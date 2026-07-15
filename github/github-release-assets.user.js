@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.2.3
+// @version      0.2.4
 // @description  Highlight platform, architecture, and package type in GitHub release assets while de-emphasizing metadata and source archives.
-// @match        https://github.com/*/*/releases
-// @match        https://github.com/*/*/releases/*
+// @match        https://github.com/*/*/releases*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -420,5 +419,7 @@
   });
   document.addEventListener('turbo:load', scheduleProcessing);
   document.addEventListener('turbo:render', scheduleProcessing);
+  document.addEventListener('turbo:frame-load', scheduleProcessing);
   document.addEventListener('pjax:end', scheduleProcessing);
+  document.addEventListener('toggle', scheduleProcessing, true);
 })();
