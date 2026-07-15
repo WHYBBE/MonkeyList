@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.1.5
+// @version      0.2.3
 // @description  Highlight platform, architecture, and package type in GitHub release assets while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases
 // @match        https://github.com/*/*/releases/*
@@ -20,10 +20,11 @@
   const ATTESTATION_TEXT = /^release attestation \(json\)$/i;
   const METADATA_FILE = /(?:\.blockmap|\.(?:sha(?:1|256|384|512)?|md5|asc|sig|gpg|json|yml|yaml|txt))$/i;
   const PLATFORM = [
-    ['android', /(?:^|[-_.])android(?:$|[-_.])|\.aab$/i],
-    ['windows', /(?:^|[-_.])(?:win(?:dows)?)(?:$|[-_.])|\.(?:exe|msi|msix|appx)$/i],
-    ['macOS', /(?:^|[-_.])(?:mac(?:os)?|osx|darwin)(?:$|[-_.])|\.(?:dmg|pkg)$/i],
-    ['Linux', /(?:^|[-_.])(?:linux|ubuntu|debian|fedora|appimage)(?:$|[-_.])|\.appimage$/i],
+    ['mobile', 'Android', /(?:^|[-_.])android(?:$|[-_.])|\.(?:apk|aab)$/i],
+    ['mobile', 'iOS', /(?:^|[-_.])(?:ios|iphone|ipad)(?:$|[-_.])|\.ipa$/i],
+    ['desktop', 'Windows', /(?:^|[-_.])(?:win(?:dows)?)(?:$|[-_.])|\.(?:exe|msi|msix|appx)$/i],
+    ['desktop', 'macOS', /(?:^|[-_.])(?:mac(?:os)?|osx|darwin)(?:$|[-_.])|\.(?:dmg|pkg)$/i],
+    ['desktop', 'Linux', /(?:^|[-_.])(?:linux|ubuntu|debian|fedora|appimage)(?:$|[-_.])|\.appimage$/i],
   ];
   const ARCHITECTURE = [
     ['ARM64', /(?:^|[-_.])(?:arm64|aarch64)(?:$|[-_.])/i],
@@ -35,6 +36,7 @@
   const PACKAGE_TYPE = [
     ['APK', /\.apk$/i],
     ['AAB', /\.aab$/i],
+    ['IPA', /\.ipa$/i],
     ['DMG', /\.dmg$/i],
     ['EXE', /\.exe$/i],
     ['MSI', /\.msi$/i],
@@ -51,6 +53,10 @@
   function firstMatch(value, rules) {
     const match = rules.find(([, pattern]) => pattern.test(value));
     return match?.[0];
+  }
+
+  function findPlatform(value) {
+    return PLATFORM.find(([, , pattern]) => pattern.test(value));
   }
 
   function createBadge(text, kind) {
@@ -82,13 +88,18 @@
       return;
     }
 
-    const platform = firstMatch(name, PLATFORM);
+    const platform = findPlatform(name);
     const architecture = firstMatch(name, ARCHITECTURE);
     const packageType = firstMatch(name, PACKAGE_TYPE);
     const badges = document.createElement('span');
     badges.className = 'gh-ran-badges';
 
-    if (platform) badges.append(createBadge(platform, 'platform'));
+    if (platform) {
+      const [device, system] = platform;
+      badges.append(createBadge(device === 'mobile' ? 'MOBILE' : 'DESKTOP', `device-${device}`));
+      badges.append(createBadge(system, `platform-${system.toLowerCase()}`));
+      row.classList.add(`gh-ran-${device}`);
+    }
     if (architecture) badges.append(createBadge(architecture, 'architecture'));
     if (packageType) badges.append(createBadge(packageType, 'package'));
 
@@ -120,6 +131,49 @@
     });
   }
 
+  function visualizeAssetDetails() {
+    document.querySelectorAll('li.Box-row').forEach((row) => {
+      if (row.hasAttribute('data-gh-ran-details')) return;
+
+      const copyButton = row.querySelector('clipboard-copy[value^="sha256:"]');
+      if (!copyButton) return;
+
+      const digest = copyButton.getAttribute('value');
+      const digestBlock = copyButton.closest('div');
+      const details = digestBlock?.parentElement;
+      if (!digest || !digestBlock || !details) return;
+
+      row.setAttribute('data-gh-ran-details', '');
+      digestBlock.classList.add('gh-ran-digest');
+      digestBlock.dataset.digest = digest;
+      copyButton.setAttribute('title', `Copy ${digest}`);
+
+      const info = [...details.children].filter((child) => child.tagName === 'SPAN');
+      const [size, time] = info;
+      if (size) {
+        size.classList.add('gh-ran-file-size');
+        size.dataset.sizeTier = getSizeTier(size.textContent.trim());
+      }
+      if (time) {
+        time.classList.add('gh-ran-file-time');
+        const relativeTime = time.querySelector('relative-time');
+        const timestamp = relativeTime?.getAttribute('datetime');
+        if (timestamp) time.title = new Date(timestamp).toLocaleString();
+      }
+    });
+  }
+
+  function getSizeTier(value) {
+    const match = /([\d.]+)\s*(bytes?|kb|mb|gb)/i.exec(value);
+    if (!match) return 'unknown';
+
+    const units = { byte: 1, bytes: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 };
+    const bytes = Number(match[1]) * units[match[2].toLowerCase()];
+    if (bytes < 10 * 1024 ** 2) return 'small';
+    if (bytes < 100 * 1024 ** 2) return 'medium';
+    return 'large';
+  }
+
   function addAssetsJump() {
     if (!/^\/[^/]+\/[^/]+\/releases\/tag\//.test(location.pathname)) return;
 
@@ -147,6 +201,7 @@
     findAssetRows().forEach(processAsset);
     processSourceCode();
     processAttestations();
+    visualizeAssetDetails();
     addAssetsJump();
   }
 
@@ -165,28 +220,136 @@
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-      .gh-ran-asset { position: relative; }
+      .gh-ran-asset {
+        position: relative;
+        border-left: 4px solid transparent;
+      }
+      .gh-ran-mobile { border-left-color: #bf8700; }
+      .gh-ran-desktop { border-left-color: #0969da; }
+      @media (min-width: 768px) {
+        .gh-ran-asset > div:first-child {
+          flex: 1 1 auto !important;
+          width: auto !important;
+          max-width: none !important;
+        }
+        .gh-ran-asset > div:nth-child(2) {
+          flex: 0 0 auto !important;
+          width: auto !important;
+          max-width: none !important;
+          margin-left: auto !important;
+        }
+      }
       .gh-ran-badges {
         display: inline-flex;
         flex-wrap: wrap;
-        gap: 5px;
-        margin: 0 10px;
+        gap: 4px;
+        margin: 0 8px;
         vertical-align: middle;
       }
       .gh-ran-badge {
         display: inline-flex;
         align-items: center;
-        min-height: 22px;
-        padding: 0 8px;
+        min-height: 20px;
+        padding: 0 7px;
         border: 1px solid;
         border-radius: 999px;
-        font: 600 12px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font: 600 11px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         letter-spacing: .02em;
         white-space: nowrap;
       }
-      .gh-ran-badge--platform { color: #0969da; background: #ddf4ff; border-color: #80ccff; }
+      .gh-ran-badge--device-mobile { color: #fff; background: #9a6700; border-color: #825000; }
+      .gh-ran-badge--device-desktop { color: #fff; background: #24292f; border-color: #1b1f24; }
+      .gh-ran-badge--platform-android { color: #1a7f37; background: #dafbe1; border-color: #4ac26b; }
+      .gh-ran-badge--platform-ios { color: #57606a; background: #f6f8fa; border-color: #afb8c1; }
+      .gh-ran-badge--platform-windows { color: #0969da; background: #ddf4ff; border-color: #54aeff; }
+      .gh-ran-badge--platform-macos { color: #57606a; background: #f6f8fa; border-color: #8c959f; }
+      .gh-ran-badge--platform-linux { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
       .gh-ran-badge--architecture { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
       .gh-ran-badge--package { color: #1a7f37; background: #dafbe1; border-color: #7ee787; }
+      .gh-ran-digest {
+        position: relative;
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+        margin-right: 2px;
+      }
+      .gh-ran-digest > .Truncate { display: none !important; }
+      .gh-ran-digest::before {
+        content: 'SHA-256';
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        padding: 0 6px;
+        border: 1px solid var(--borderColor-muted, #d8dee4);
+        border-radius: 4px;
+        color: var(--fgColor-muted, #57606a);
+        background: var(--bgColor-muted, #f6f8fa);
+        font: 600 10px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: .02em;
+      }
+      .gh-ran-digest::after {
+        content: attr(data-digest);
+        position: absolute;
+        z-index: 20;
+        right: 0;
+        bottom: calc(100% + 7px);
+        width: max-content;
+        max-width: min(460px, 78vw);
+        padding: 7px 9px;
+        border-radius: 6px;
+        color: #fff;
+        background: #24292f;
+        box-shadow: 0 4px 12px rgb(27 31 36 / .25);
+        font: 11px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        overflow-wrap: anywhere;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(3px);
+        transition: opacity .15s ease, transform .15s ease;
+      }
+      .gh-ran-digest:hover::after,
+      .gh-ran-digest:focus-within::after { opacity: 1; transform: translateY(0); }
+      .gh-ran-file-size,
+      .gh-ran-file-time {
+        display: inline-flex !important;
+        align-items: center;
+        min-height: 28px;
+        min-width: auto !important;
+        margin-left: 8px !important;
+        padding: 0 8px;
+        border: 1px solid var(--borderColor-muted, #d8dee4);
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 20px;
+      }
+      .gh-ran-file-size {
+        min-width: 76px !important;
+        justify-content: center;
+        color: #1a7f37;
+        background: #dafbe1;
+        border-color: #7ee787;
+      }
+      .gh-ran-file-size[data-size-tier="medium"] { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
+      .gh-ran-file-size[data-size-tier="large"] { color: #cf222e; background: #ffebe9; border-color: #ff8182; }
+      .gh-ran-file-size[data-size-tier="unknown"] { color: #57606a; background: #f6f8fa; border-color: #d8dee4; }
+      .gh-ran-file-time {
+        color: #57606a;
+        background: #f6f8fa;
+      }
+      .gh-ran-file-time::before {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 6px;
+        border: 2px solid #8250df;
+        border-radius: 50%;
+        box-sizing: border-box;
+        content: '';
+        box-shadow: inset 2px -1px 0 -1px #8250df;
+      }
+      .gh-ran-file-time::before {
+        flex-shrink: 0;
+      }
       .gh-ran-muted {
         opacity: .42;
         filter: grayscale(1);
@@ -225,7 +388,22 @@
       }
       .gh-ran-assets-jump:focus-visible { outline: 2px solid #54aeff; outline-offset: 2px; }
       @media (prefers-color-scheme: dark) {
-        .gh-ran-badge--platform { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
+        .gh-ran-mobile { border-left-color: #d4a72c; }
+        .gh-ran-desktop { border-left-color: #58a6ff; }
+        .gh-ran-badge--device-mobile { color: #fff8c5; background: #6e4c00; border-color: #9e6a03; }
+        .gh-ran-badge--device-desktop { color: #f0f6fc; background: #30363d; border-color: #484f58; }
+        .gh-ran-badge--platform-android { color: #7ee787; background: #173c24; border-color: #2ea043; }
+        .gh-ran-badge--platform-ios { color: #c9d1d9; background: #21262d; border-color: #6e7681; }
+        .gh-ran-badge--platform-windows { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
+        .gh-ran-badge--platform-macos { color: #c9d1d9; background: #21262d; border-color: #6e7681; }
+        .gh-ran-badge--platform-linux { color: #e3b341; background: #3d2e00; border-color: #9e6a03; }
+        .gh-ran-digest::before { color: #8b949e; background: #21262d; border-color: #30363d; }
+        .gh-ran-file-size { color: #7ee787; background: #173c24; border-color: #2ea043; }
+        .gh-ran-file-size[data-size-tier="medium"] { color: #e3b341; background: #3d2e00; border-color: #9e6a03; }
+        .gh-ran-file-size[data-size-tier="large"] { color: #ff7b72; background: #490202; border-color: #da3633; }
+        .gh-ran-file-size[data-size-tier="unknown"] { color: #8b949e; background: #21262d; border-color: #30363d; }
+        .gh-ran-file-time { color: #8b949e; background: #21262d; border-color: #30363d; }
+        .gh-ran-file-time::before { border-color: #a371f7; box-shadow: inset 2px -1px 0 -1px #a371f7; }
         .gh-ran-badge--architecture { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
         .gh-ran-badge--package { color: #7ee787; background: #173c24; border-color: #2ea043; }
       }
