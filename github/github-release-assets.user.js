@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.2.4
+// @version      0.3.1
 // @description  Highlight platform, architecture, and package type in GitHub release assets while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -17,7 +17,9 @@
   const SOURCE_CODE_TEXT = /^source code \((?:zip|tar\.gz)\)$/i;
   const SOURCE_CODE_URL = /\/archive\/refs\/(?:tags|heads)\/[^?#]+\.(?:zip|tar\.gz)(?:[?#]|$)/i;
   const ATTESTATION_TEXT = /^release attestation \(json\)$/i;
-  const METADATA_FILE = /(?:\.blockmap|\.(?:sha(?:1|256|384|512)?|md5|asc|sig|gpg|json|yml|yaml|txt))$/i;
+  const METADATA_FILE = /(?:\.blockmap|\.(?:asc|sig|gpg|json|yml|yaml|txt))$/i;
+  const CHECKSUM_SUFFIX = /\.(?:sha(?:1|224|256|384|512)?(?:sum)?|md5)$/i;
+  const SMALL_METADATA_SIZE = 2 * 1024 * 1024;
   const PLATFORM = [
     ['mobile', 'Android', /(?:^|[-_.])android(?:$|[-_.])|\.(?:apk|aab)$/i],
     ['mobile', 'iOS', /(?:^|[-_.])(?:ios|iphone|ipad)(?:$|[-_.])|\.ipa$/i],
@@ -71,6 +73,25 @@
     );
   }
 
+  function getAssetRow(link) {
+    return link.closest('li, .Box-row') || link.parentElement;
+  }
+
+  function getFileSize(row) {
+    const text = [...row.querySelectorAll('span')]
+      .map((span) => span.textContent.trim())
+      .find((value) => /^[\d.]+\s*(?:bytes?|kb|mb|gb)$/i.test(value));
+    if (!text) return null;
+
+    const match = /([\d.]+)\s*(bytes?|kb|mb|gb)/i.exec(text);
+    const units = { byte: 1, bytes: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 };
+    return match ? Number(match[1]) * units[match[2].toLowerCase()] : null;
+  }
+
+  function isChecksum(name, row) {
+    return CHECKSUM_SUFFIX.test(name) && (getFileSize(row) ?? 0) <= SMALL_METADATA_SIZE;
+  }
+
   function processAsset(link) {
     if (link.hasAttribute(PROCESSED)) return;
 
@@ -78,12 +99,14 @@
     if (!name) return;
 
     link.setAttribute(PROCESSED, '');
-    const row = link.closest('li, .Box-row') || link.parentElement;
+    const row = getAssetRow(link);
     if (!row) return;
 
-    if (METADATA_FILE.test(name)) {
+    const checksum = isChecksum(name, row);
+    if (METADATA_FILE.test(name) || checksum) {
       row.classList.add('gh-ran-muted');
       link.classList.add('gh-ran-link-muted');
+      if (checksum) row.dataset.ghRanChecksum = name.replace(CHECKSUM_SUFFIX, '');
       return;
     }
 
@@ -127,6 +150,25 @@
       const row = link.closest('li, .Box-row') || link.parentElement;
       row?.classList.add('gh-ran-muted');
       link.classList.add('gh-ran-link-muted');
+    });
+  }
+
+  function groupChecksums() {
+    document.querySelectorAll('[data-gh-ran-checksum]').forEach((checksumRow) => {
+      const targetName = checksumRow.dataset.ghRanChecksum;
+      if (!targetName || checksumRow.dataset.ghRanGrouped === 'true') return;
+
+      const assets = [...findAssetRows()].filter((link) => {
+        const row = getAssetRow(link);
+        return row !== checksumRow && !row?.hasAttribute('data-gh-ran-checksum');
+      });
+      const assetLink = assets.find((link) => link.textContent.trim() === targetName)
+        || assets.find((link) => link.textContent.trim().startsWith(`${targetName}.`));
+      const assetRow = assetLink && getAssetRow(assetLink);
+      if (!assetRow || assetRow === checksumRow) return;
+
+      assetRow.insertAdjacentElement('afterend', checksumRow);
+      checksumRow.dataset.ghRanGrouped = 'true';
     });
   }
 
@@ -198,6 +240,7 @@
   function processPage() {
     addStyles();
     findAssetRows().forEach(processAsset);
+    groupChecksums();
     processSourceCode();
     processAttestations();
     visualizeAssetDetails();
