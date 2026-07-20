@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Release Asset Navigator
 // @namespace    https://github.com/
-// @version      0.3.1
+// @version      0.3.2
 // @description  Highlight platform, architecture, and package type in GitHub release assets while de-emphasizing metadata and source archives.
 // @match        https://github.com/*/*/releases*
 // @grant        none
@@ -236,6 +236,7 @@
   }
 
   let processingScheduled = false;
+  let retryTimer;
 
   function processPage() {
     addStyles();
@@ -254,6 +255,20 @@
       processingScheduled = false;
       processPage();
     });
+  }
+
+  function processWithRetries() {
+    clearTimeout(retryTimer);
+    scheduleProcessing();
+
+    // GitHub may replace lazy include-fragments after the navigation event.
+    const delays = [150, 500, 1500, 3500];
+    let index = 0;
+    const retry = () => {
+      scheduleProcessing();
+      if (index < delays.length) retryTimer = setTimeout(retry, delays[index++]);
+    };
+    retryTimer = setTimeout(retry, delays[index++]);
   }
 
   function addStyles() {
@@ -454,15 +469,17 @@
   }
 
   addStyles();
-  processPage();
+  processWithRetries();
 
   new MutationObserver(scheduleProcessing).observe(document.documentElement, {
     childList: true,
     subtree: true,
   });
-  document.addEventListener('turbo:load', scheduleProcessing);
-  document.addEventListener('turbo:render', scheduleProcessing);
-  document.addEventListener('turbo:frame-load', scheduleProcessing);
-  document.addEventListener('pjax:end', scheduleProcessing);
-  document.addEventListener('toggle', scheduleProcessing, true);
+  document.addEventListener('turbo:load', processWithRetries);
+  document.addEventListener('turbo:render', processWithRetries);
+  document.addEventListener('turbo:frame-load', processWithRetries);
+  document.addEventListener('pjax:end', processWithRetries);
+  document.addEventListener('include-fragment-replace', processWithRetries);
+  document.addEventListener('include-fragment-load', processWithRetries);
+  document.addEventListener('toggle', processWithRetries, true);
 })();
