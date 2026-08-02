@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.4.0
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, and de-emphasizing promotional topics.
+// @version      0.6.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, and surfacing the post creation date inside the activity column.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -15,6 +15,8 @@
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
   const PROMO_CLASS = 'ld-tle-promo';
+  const TIME_CLASS = 'ld-tle-time';
+  const TIME_DONE = 'data-ld-tle-timedone';
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
 
@@ -60,10 +62,46 @@
     });
   }
 
+  function parseCreatedDate(title) {
+    if (!title) return null;
+    const m = title.match(/创建日期[：:]\s*(.+?)(?:\n|$)/);
+    return m ? m[1].trim() : null;
+  }
+
+  function formatCreated(raw) {
+    const m = raw.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*(\d{1,2}):(\d{2}))?/);
+    if (!m) return raw;
+    const [, y, mo, d, h, mi] = m;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const md = `${pad(Number(mo))}-${pad(Number(d))}`;
+    const hm = h ? ` ${pad(Number(h))}:${mi}` : '';
+    return Number(y) === now.getFullYear() ? md + hm : `${y}-${md}${hm}`;
+  }
+
+  function injectTimes() {
+    document.querySelectorAll('tr.topic-list-item').forEach((row) => {
+      if (row.hasAttribute(TIME_DONE)) return;
+      const activityTd = row.querySelector('td.activity');
+      if (!activityTd) return;
+      const created = parseCreatedDate(activityTd.getAttribute('title') || '');
+      if (!created) return;
+      row.setAttribute(TIME_DONE, '');
+      const link = activityTd.querySelector('.post-activity');
+      if (!link) return;
+      const chip = document.createElement('span');
+      chip.className = TIME_CLASS;
+      chip.textContent = formatCreated(created);
+      chip.title = `发帖于 ${created}`;
+      link.insertAdjacentElement('afterend', chip);
+    });
+  }
+
   function processPage() {
     addStyles();
     document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
     weakenPromoRows();
+    injectTimes();
   }
 
   let processingScheduled = false;
@@ -137,6 +175,19 @@
         background: transparent;
       }
       tr.${PROMO_CLASS}:hover .raw-topic-link { text-decoration: none; }
+      .${TIME_CLASS} {
+        display: block;
+        margin-top: 3px;
+        padding: 1px 6px;
+        border: 1px solid #d0d7de;
+        border-radius: 5px;
+        color: #57606a;
+        background: #f6f8fa;
+        font: 500 11px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: nowrap;
+        text-align: center;
+      }
+      tr.${PROMO_CLASS} .${TIME_CLASS} { opacity: .7; }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
         .${CHIP_CLASS}--1 { color: #f0f6fc; background: #1f6feb; }
@@ -148,6 +199,7 @@
         td.${ROW_CLASS}--2 { box-shadow: inset 3px 0 0 #2ea043 !important; }
         td.${ROW_CLASS}--3 { box-shadow: inset 3px 0 0 #e3b341 !important; }
         td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8957e5 !important; }
+        .${TIME_CLASS} { color: #8b949e; background: #21262d; border-color: #30363d; }
       }
     `;
     document.head.append(style);
