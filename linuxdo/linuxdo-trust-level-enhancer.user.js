@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.2.0
-// @description  Enhance trust level display on linux.do with colored level badges right next to post author names, lazily fetched from user cards.
+// @version      0.3.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips and adding a trust-level colored accent on topic rows.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -12,190 +12,46 @@
   'use strict';
 
   const STYLE_ID = 'ld-tle-style';
-  const POST_DONE = 'data-ld-tle-postdone';
-  const BADGE_CLASS = 'ld-tle-badge';
-  const CACHE_KEY = 'ld-tle-cache-v1';
-  const CACHE_LONG_TTL = 7 * 24 * 60 * 60 * 1000;
-  const CACHE_SHORT_TTL = 5 * 60 * 1000;
-  const MAX_CONCURRENCY = 4;
-  const FETCH_TIMEOUT = 12000;
-  const TRUST_LEVELS = [
-    { name: '新用户' },
-    { name: '基本用户' },
-    { name: '成员' },
-    { name: '活跃' },
-    { name: '领袖' },
-  ];
+  const CHIP_CLASS = 'ld-tle-chip';
+  const ROW_CLASS = 'ld-tle-row';
+  const NAME_SEL = '.badge-category__name';
 
-  const cache = new Map(loadCache());
-  const inflight = new Map();
-  const jobs = new WeakMap();
-  let active = 0;
-  const queue = [];
-
-  function loadCache() {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return [];
-      const data = JSON.parse(raw);
-      return Array.isArray(data) ? data : [];
-    } catch (e) {
-      return [];
+  function parseLevel(text) {
+    text = (text || '').trim();
+    if (!text) return null;
+    let m = text.match(/^(.+?)[,，]\s*Lv\s*(\d+)\s*$/i);
+    if (m && m[1].trim()) return { name: m[1].trim(), level: Number(m[2]) };
+    m = text.match(/\bLv\s*(\d+)\b/i);
+    if (m) {
+      const level = Number(m[1]);
+      const name = text.replace(/\s*[,，]?\s*Lv\s*\d+\s*/i, '').trim();
+      if (name && level >= 0 && level <= 4) return { name, level };
     }
+    return null;
   }
 
-  function saveCache() {
-    try {
-      const entries = [...cache.entries()].slice(-2000);
-      localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
-    } catch (e) {
-      // ignore quota or serialization errors
+  function enhanceBadge(nameEl) {
+    const parsed = parseLevel(nameEl.textContent);
+    const row = nameEl.closest('tr.topic-list-item');
+    const td = row && row.querySelector('td.main-link');
+    if (td && parsed) {
+      td.classList.add(ROW_CLASS, `${ROW_CLASS}--${parsed.level}`);
     }
-  }
+    const intact = nameEl.lastElementChild && nameEl.lastElementChild.classList.contains(CHIP_CLASS);
+    if (intact || !parsed) return;
 
-  function cachedLevel(username) {
-    const entry = cache.get(username);
-    if (!entry) return null;
-    const ttl = entry.tl >= 0 ? CACHE_LONG_TTL : CACHE_SHORT_TTL;
-    if (Date.now() - entry.ts > ttl) return null;
-    return entry.tl;
-  }
-
-  function enqueue(task) {
-    return new Promise((resolve, reject) => {
-      queue.push({ task, resolve, reject });
-      pump();
-    });
-  }
-
-  function pump() {
-    while (active < MAX_CONCURRENCY && queue.length) {
-      const { task, resolve, reject } = queue.shift();
-      active += 1;
-      Promise.resolve()
-        .then(task)
-        .then(resolve, reject)
-        .finally(() => {
-          active -= 1;
-          pump();
-        });
-    }
-  }
-
-  function fetchLevel(username) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-    return fetch(`/u/${encodeURIComponent(username)}/card.json`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    })
-      .then((response) => {
-        clearTimeout(timer);
-        if (!response.ok) throw new Error(`card.json ${response.status}`);
-        return response.json();
-      })
-      .then((data) => {
-        const tl = data && data.user && data.user.trust_level;
-        return typeof tl === 'number' ? tl : -1;
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        throw err;
-      });
-  }
-
-  function ensureLevel(username) {
-    const cached = cachedLevel(username);
-    if (cached !== null) return Promise.resolve(cached);
-    const existing = inflight.get(username);
-    if (existing) return existing;
-    const task = () =>
-      fetchLevel(username)
-        .then((tl) => {
-          cache.set(username, { tl, ts: Date.now() });
-          saveCache();
-          return tl;
-        })
-        .catch(() => {
-          cache.set(username, { tl: -1, ts: Date.now() });
-          saveCache();
-          return -1;
-        });
-    const promise = enqueue(task);
-    inflight.set(username, promise);
-    promise.finally(() => inflight.delete(username));
-    return promise;
-  }
-
-  const observer = typeof IntersectionObserver === 'undefined'
-    ? null
-    : new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const el = entry.target;
-            const job = jobs.get(el);
-            if (job) {
-              jobs.delete(el);
-              ensureLevel(job.username).then(job.render);
-            }
-            observer.unobserve(el);
-          }
-        },
-        { rootMargin: '300px' }
-      );
-
-  function watch(element, username, render) {
-    if (!username) return;
-    if (observer) {
-      jobs.set(element, { username, render });
-      observer.observe(element);
-    } else {
-      ensureLevel(username).then(render);
-    }
-  }
-
-  function createBadge() {
-    const badge = document.createElement('span');
-    badge.className = `${BADGE_CLASS} ld-tle-badge--pending`;
-    badge.textContent = 'Lv?';
-    return badge;
-  }
-
-  function paintBadge(badge, level) {
-    badge.classList.remove('ld-tle-badge--pending');
-    if (level < 0 || level > 4) {
-      badge.classList.add('ld-tle-badge--unknown');
-      badge.textContent = 'Lv?';
-      return;
-    }
-    badge.classList.add(`ld-tle-badge--${level}`);
-    badge.textContent = `Lv${level} ${TRUST_LEVELS[level].name}`;
-    badge.title = `信任等级 ${level} · ${TRUST_LEVELS[level].name}`;
-  }
-
-  function processPost(post) {
-    if (post.hasAttribute(POST_DONE)) return;
-    const names = post.querySelector('.names');
-    const meta = post.querySelector('.topic-meta-data');
-    const anchor = names
-      ? names.querySelector('a[data-user-card]')
-      : (meta && meta.querySelector('a[data-user-card]'))
-        || [...post.querySelectorAll('a[data-user-card]')].find((a) => !a.querySelector('img'))
-        || null;
-    if (!anchor) return;
-    const username = anchor.getAttribute('data-user-card') || '';
-    if (!username) return;
-    post.setAttribute(POST_DONE, '');
-
-    const badge = createBadge();
-    anchor.insertAdjacentElement('afterend', badge);
-    watch(badge, username, (level) => paintBadge(badge, level));
+    const { name, level } = parsed;
+    nameEl.textContent = name;
+    const chip = document.createElement('span');
+    chip.className = `${CHIP_CLASS} ${CHIP_CLASS}--${level}`;
+    chip.textContent = `Lv${level}`;
+    chip.title = `信任等级 ${level}`;
+    nameEl.append(chip);
   }
 
   function processPage() {
     addStyles();
-    document.querySelectorAll('article[id^="post_"]:not([data-ld-tle-postdone])').forEach(processPost);
+    document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
   }
 
   let processingScheduled = false;
@@ -228,34 +84,38 @@
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-      .${BADGE_CLASS} {
+      .${CHIP_CLASS} {
         display: inline-flex;
         align-items: center;
-        min-height: 20px;
         margin-left: 6px;
-        padding: 0 7px;
-        border: 1px solid;
+        padding: 0 6px;
         border-radius: 999px;
-        font: 600 11px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        letter-spacing: .02em;
-        white-space: nowrap;
-        vertical-align: middle;
+        font: 700 10px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: .03em;
+        vertical-align: 1px;
       }
-      .ld-tle-badge--pending,
-      .ld-tle-badge--unknown { color: #57606a; background: #f6f8fa; border-color: #d0d7de; }
-      .ld-tle-badge--0 { color: #57606a; background: #eff2f5; border-color: #afb8c1; }
-      .ld-tle-badge--1 { color: #0969da; background: #ddf4ff; border-color: #54aeff; }
-      .ld-tle-badge--2 { color: #1a7f37; background: #dafbe1; border-color: #4ac26b; }
-      .ld-tle-badge--3 { color: #9a6700; background: #fff8c5; border-color: #d4a72c; }
-      .ld-tle-badge--4 { color: #8250df; background: #fbefff; border-color: #d8b4fe; }
+      .${CHIP_CLASS}--0 { color: #fff; background: #8a9199; }
+      .${CHIP_CLASS}--1 { color: #fff; background: #0969da; }
+      .${CHIP_CLASS}--2 { color: #fff; background: #1a7f37; }
+      .${CHIP_CLASS}--3 { color: #24292f; background: #d4a72c; }
+      .${CHIP_CLASS}--4 { color: #fff; background: #8250df; }
+      td.${ROW_CLASS} { box-shadow: inset 3px 0 0 transparent !important; }
+      td.${ROW_CLASS}--0 { box-shadow: inset 3px 0 0 #8a9199 !important; }
+      td.${ROW_CLASS}--1 { box-shadow: inset 3px 0 0 #0969da !important; }
+      td.${ROW_CLASS}--2 { box-shadow: inset 3px 0 0 #1a7f37 !important; }
+      td.${ROW_CLASS}--3 { box-shadow: inset 3px 0 0 #d4a72c !important; }
+      td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8250df !important; }
       @media (prefers-color-scheme: dark) {
-        .ld-tle-badge--pending,
-        .ld-tle-badge--unknown { color: #8b949e; background: #21262d; border-color: #30363d; }
-        .ld-tle-badge--0 { color: #8b949e; background: #21262d; border-color: #6e7681; }
-        .ld-tle-badge--1 { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
-        .ld-tle-badge--2 { color: #7ee787; background: #173c24; border-color: #2ea043; }
-        .ld-tle-badge--3 { color: #e3b341; background: #3d2e00; border-color: #9e6a03; }
-        .ld-tle-badge--4 { color: #d2a8ff; background: #2d1f4e; border-color: #8957e5; }
+        .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
+        .${CHIP_CLASS}--1 { color: #f0f6fc; background: #1f6feb; }
+        .${CHIP_CLASS}--2 { color: #f0f6fc; background: #2ea043; }
+        .${CHIP_CLASS}--3 { color: #3d2e00; background: #e3b341; }
+        .${CHIP_CLASS}--4 { color: #f0f6fc; background: #8957e5; }
+        td.${ROW_CLASS}--0 { box-shadow: inset 3px 0 0 #6e7681 !important; }
+        td.${ROW_CLASS}--1 { box-shadow: inset 3px 0 0 #1f6feb !important; }
+        td.${ROW_CLASS}--2 { box-shadow: inset 3px 0 0 #2ea043 !important; }
+        td.${ROW_CLASS}--3 { box-shadow: inset 3px 0 0 #e3b341 !important; }
+        td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8957e5 !important; }
       }
     `;
     document.head.append(style);
