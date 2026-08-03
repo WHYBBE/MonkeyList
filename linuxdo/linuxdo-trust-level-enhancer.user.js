@@ -223,12 +223,12 @@
       .${CHIP_CLASS}--2 { color: #fff; background: #1a7f37; }
       .${CHIP_CLASS}--3 { color: #24292f; background: #d4a72c; }
       .${CHIP_CLASS}--4 { color: #fff; background: #8250df; }
-      td.${ROW_CLASS} { box-shadow: inset 3px 0 0 transparent !important; }
-      td.${ROW_CLASS}--0 { box-shadow: inset 3px 0 0 #8a9199 !important; }
-      td.${ROW_CLASS}--1 { box-shadow: inset 3px 0 0 #0969da !important; }
-      td.${ROW_CLASS}--2 { box-shadow: inset 3px 0 0 #1a7f37 !important; }
-      td.${ROW_CLASS}--3 { box-shadow: inset 3px 0 0 #d4a72c !important; }
-      td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8250df !important; }
+      td.${ROW_CLASS} { --ld-tle-lv: transparent; box-shadow: inset 3px 0 0 0 var(--ld-tle-lv) !important; }
+      td.${ROW_CLASS}--0 { --ld-tle-lv: #8a9199; }
+      td.${ROW_CLASS}--1 { --ld-tle-lv: #0969da; }
+      td.${ROW_CLASS}--2 { --ld-tle-lv: #1a7f37; }
+      td.${ROW_CLASS}--3 { --ld-tle-lv: #d4a72c; }
+      td.${ROW_CLASS}--4 { --ld-tle-lv: #8250df; }
       tr.${PROMO_CLASS} td {
         opacity: .38;
         filter: grayscale(.7);
@@ -282,8 +282,8 @@
         box-shadow: inset 2px 0 0 #8250df !important;
         padding-left: 6px !important;
       }
-      tr.${LONELY_CLASS} td.main-link {
-        box-shadow: inset 3px 0 0 #9a6700 !important;
+      tr.${LONELY_CLASS} td.main-link:not(.${ROW_CLASS}) {
+        box-shadow: inset 3px 0 0 0 #bf8700 !important;
       }
       tr.${LONELY_CLASS} .raw-topic-link::after {
         content: '待回复';
@@ -316,14 +316,16 @@
         .${CHIP_CLASS}--2 { color: #f0f6fc; background: #2ea043; }
         .${CHIP_CLASS}--3 { color: #3d2e00; background: #e3b341; }
         .${CHIP_CLASS}--4 { color: #f0f6fc; background: #8957e5; }
-        td.${ROW_CLASS}--0 { box-shadow: inset 3px 0 0 #6e7681 !important; }
-        td.${ROW_CLASS}--1 { box-shadow: inset 3px 0 0 #1f6feb !important; }
-        td.${ROW_CLASS}--2 { box-shadow: inset 3px 0 0 #2ea043 !important; }
-        td.${ROW_CLASS}--3 { box-shadow: inset 3px 0 0 #e3b341 !important; }
-        td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8957e5 !important; }
+        td.${ROW_CLASS}--0 { --ld-tle-lv: #6e7681; }
+        td.${ROW_CLASS}--1 { --ld-tle-lv: #1f6feb; }
+        td.${ROW_CLASS}--2 { --ld-tle-lv: #2ea043; }
+        td.${ROW_CLASS}--3 { --ld-tle-lv: #e3b341; }
+        td.${ROW_CLASS}--4 { --ld-tle-lv: #8957e5; }
         .${TIME_CLASS} { color: #8b949e; background: #21262d; border-color: #30363d; }
         article.${OP_POST_CLASS} .names .first::after { background: #8957e5; }
-        tr.${LONELY_CLASS} td.main-link { box-shadow: inset 3px 0 0 #9e6a03 !important; }
+        tr.${LONELY_CLASS} td.main-link:not(.${ROW_CLASS}) {
+          box-shadow: inset 3px 0 0 0 #9e6a03 !important;
+        }
         tr.${LONELY_CLASS} .raw-topic-link::after { background: #9e6a03; }
         img.ld-tle-op { box-shadow: 0 0 0 2px #6e7681 !important; }
         img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 2px #1f6feb !important; }
