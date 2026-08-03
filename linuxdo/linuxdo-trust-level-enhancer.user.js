@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.8.0
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, and emphasizing the original poster (楼主) on topic pages.
+// @version      0.9.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, and marking topics with no replies.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -15,6 +15,7 @@
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
   const PROMO_CLASS = 'ld-tle-promo';
+  const LONELY_CLASS = 'ld-tle-lonely';
   const TIME_CLASS = 'ld-tle-time';
   const TIME_DONE = 'data-ld-tle-timedone';
   const POSTERS_DONE = 'data-ld-tle-postersdone';
@@ -64,6 +65,18 @@
         .map((a) => a.getAttribute('data-tag-name'));
       const isPromo = PROMO_TAGS.some((t) => tagNames.includes(t));
       row.classList.toggle(PROMO_CLASS, isPromo);
+    });
+  }
+
+  function markLonelyTopics() {
+    document.querySelectorAll('tr.topic-list-item').forEach((row) => {
+      const postersTd = row.querySelector('td.posters');
+      if (!postersTd) return;
+      const usernames = [...postersTd.querySelectorAll('a[data-user-card]')]
+        .map((a) => a.getAttribute('data-user-card'));
+      const unique = [...new Set(usernames)].filter(Boolean);
+      const isLonely = unique.length > 0 && unique.length === 1;
+      row.classList.toggle(LONELY_CLASS, isLonely);
     });
   }
 
@@ -159,6 +172,7 @@
     addStyles();
     document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
     weakenPromoRows();
+    markLonelyTopics();
     injectTimes();
     enhancePosters();
     enhanceOpPosts();
@@ -268,6 +282,21 @@
         box-shadow: inset 2px 0 0 #8250df !important;
         padding-left: 6px !important;
       }
+      tr.${LONELY_CLASS} td.main-link {
+        box-shadow: inset 3px 0 0 #9a6700 !important;
+      }
+      tr.${LONELY_CLASS} .raw-topic-link::after {
+        content: '待回复';
+        display: inline-flex;
+        align-items: center;
+        margin-left: 6px;
+        padding: 0 6px;
+        border-radius: 3px;
+        color: #fff;
+        background: #9a6700;
+        font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        vertical-align: middle;
+      }
       .${TIME_CLASS} {
         display: block;
         margin-top: 3px;
@@ -294,6 +323,8 @@
         td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8957e5 !important; }
         .${TIME_CLASS} { color: #8b949e; background: #21262d; border-color: #30363d; }
         article.${OP_POST_CLASS} .names .first::after { background: #8957e5; }
+        tr.${LONELY_CLASS} td.main-link { box-shadow: inset 3px 0 0 #9e6a03 !important; }
+        tr.${LONELY_CLASS} .raw-topic-link::after { background: #9e6a03; }
         img.ld-tle-op { box-shadow: 0 0 0 2px #6e7681 !important; }
         img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 2px #1f6feb !important; }
         img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 2px #2ea043 !important; }
