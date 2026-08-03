@@ -18,8 +18,6 @@
   const TIME_CLASS = 'ld-tle-time';
   const TIME_DONE = 'data-ld-tle-timedone';
   const POSTERS_DONE = 'data-ld-tle-postersdone';
-  const OP_POST_DONE = 'data-ld-tle-oppostdone';
-  const OP_TAG_CLASS = 'ld-tle-op-tag';
   const OP_POST_CLASS = 'ld-tle-op-post';
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
@@ -152,17 +150,8 @@
     const opId = getOpUserId();
     if (!opId) return;
     document.querySelectorAll('article[id^="post_"]').forEach((post) => {
-      if (post.hasAttribute(OP_POST_DONE)) return;
       if (post.getAttribute('data-user-id') !== opId) return;
-      post.setAttribute(OP_POST_DONE, '');
       post.classList.add(OP_POST_CLASS);
-      const names = post.querySelector('.names');
-      const firstName = names && names.querySelector('.first');
-      if (!firstName || firstName.querySelector(`.${OP_TAG_CLASS}`)) return;
-      const tag = document.createElement('span');
-      tag.className = OP_TAG_CLASS;
-      tag.textContent = '楼主';
-      firstName.insertAdjacentElement('afterend', tag);
     });
   }
 
@@ -263,7 +252,8 @@
         opacity: .85 !important;
         filter: none !important;
       }
-      .${OP_TAG_CLASS} {
+      article.${OP_POST_CLASS} .names .first::after {
+        content: '楼主';
         display: inline-flex;
         align-items: center;
         margin: 0 0 0 6px;
@@ -276,6 +266,7 @@
       }
       article.${OP_POST_CLASS} {
         box-shadow: inset 2px 0 0 #8250df !important;
+        padding-left: 6px !important;
       }
       .${TIME_CLASS} {
         display: block;
@@ -302,7 +293,7 @@
         td.${ROW_CLASS}--3 { box-shadow: inset 3px 0 0 #e3b341 !important; }
         td.${ROW_CLASS}--4 { box-shadow: inset 3px 0 0 #8957e5 !important; }
         .${TIME_CLASS} { color: #8b949e; background: #21262d; border-color: #30363d; }
-        .${OP_TAG_CLASS} { background: #8957e5; }
+        article.${OP_POST_CLASS} .names .first::after { background: #8957e5; }
         img.ld-tle-op { box-shadow: 0 0 0 2px #6e7681 !important; }
         img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 2px #1f6feb !important; }
         img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 2px #2ea043 !important; }
