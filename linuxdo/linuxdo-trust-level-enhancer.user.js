@@ -17,6 +17,7 @@
   const PROMO_CLASS = 'ld-tle-promo';
   const LONELY_CLASS = 'ld-tle-lonely';
   const STALE_CLASS = 'ld-tle-stale';
+  const WELFARE_BADGE_CLASS = 'ld-tle-welfare';
   const TIME_CLASS = 'ld-tle-time';
   const TIME_DONE = 'data-ld-tle-timedone';
   const POSTERS_DONE = 'data-ld-tle-postersdone';
@@ -58,6 +59,15 @@
     chip.textContent = `Lv${level}`;
     chip.title = `信任等级 ${level}`;
     nameEl.append(chip);
+  }
+
+  function enhanceWelfareBadge() {
+    document.querySelectorAll('a.badge-category__wrapper[href*="/c/welfare/"]').forEach((wrapper) => {
+      const badge = wrapper.querySelector('.badge-category');
+      if (badge && !badge.classList.contains(WELFARE_BADGE_CLASS)) {
+        badge.classList.add(WELFARE_BADGE_CLASS);
+      }
+    });
   }
 
   function weakenPromoRows() {
@@ -198,6 +208,7 @@
   function processPage() {
     addStyles();
     document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
+    enhanceWelfareBadge();
     weakenPromoRows();
     markLonelyTopics();
     markStaleTopics();
@@ -251,6 +262,11 @@
       .${CHIP_CLASS}--2 { color: #fff; background: #1a7f37; }
       .${CHIP_CLASS}--3 { color: #24292f; background: #d4a72c; }
       .${CHIP_CLASS}--4 { color: #fff; background: #8250df; }
+      .${WELFARE_BADGE_CLASS} {
+        box-shadow: 0 0 0 2px rgba(228,87,53,.55), 0 2px 6px rgba(228,87,53,.3) !important;
+        background: rgba(228,87,53,.14) !important;
+        font-weight: 700 !important;
+      }
       td.${ROW_CLASS} { --ld-tle-lv: transparent; box-shadow: inset 3px 0 0 0 var(--ld-tle-lv) !important; }
       td.${ROW_CLASS}--0 { --ld-tle-lv: #8a9199; }
       td.${ROW_CLASS}--1 { --ld-tle-lv: #0969da; }
@@ -353,6 +369,10 @@
         .${CHIP_CLASS}--2 { color: #f0f6fc; background: #2ea043; }
         .${CHIP_CLASS}--3 { color: #3d2e00; background: #e3b341; }
         .${CHIP_CLASS}--4 { color: #f0f6fc; background: #8957e5; }
+        .${WELFARE_BADGE_CLASS} {
+          box-shadow: 0 0 0 2px rgba(228,87,53,.6), 0 2px 6px rgba(0,0,0,.4) !important;
+          background: rgba(228,87,53,.18) !important;
+        }
         td.${ROW_CLASS}--0 { --ld-tle-lv: #6e7681; }
         td.${ROW_CLASS}--1 { --ld-tle-lv: #1f6feb; }
         td.${ROW_CLASS}--2 { --ld-tle-lv: #2ea043; }
