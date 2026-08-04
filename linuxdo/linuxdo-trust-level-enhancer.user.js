@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.9.0
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, and marking topics with no replies.
+// @version      0.10.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -16,6 +16,7 @@
   const ROW_CLASS = 'ld-tle-row';
   const PROMO_CLASS = 'ld-tle-promo';
   const LONELY_CLASS = 'ld-tle-lonely';
+  const STALE_CLASS = 'ld-tle-stale';
   const TIME_CLASS = 'ld-tle-time';
   const TIME_DONE = 'data-ld-tle-timedone';
   const POSTERS_DONE = 'data-ld-tle-postersdone';
@@ -81,6 +82,27 @@
         if (!row.classList.contains(LONELY_CLASS)) row.classList.add(LONELY_CLASS);
       } else {
         if (row.classList.contains(LONELY_CLASS)) row.classList.remove(LONELY_CLASS);
+      }
+    });
+  }
+
+  function markStaleTopics() {
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    document.querySelectorAll('tr.topic-list-item').forEach((row) => {
+      const activityTd = row.querySelector('td.activity');
+      if (!activityTd) return;
+      const created = parseCreatedDate(activityTd.getAttribute('title') || '');
+      if (!created) return;
+      const m = created.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*(\d{1,2}):(\d{2}))?/);
+      if (!m) return;
+      const ts = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : 0, m[5] ? Number(m[5]) : 0).getTime();
+      if (isNaN(ts)) return;
+      const isStale = now - ts > WEEK_MS;
+      if (isStale) {
+        if (!row.classList.contains(STALE_CLASS)) row.classList.add(STALE_CLASS);
+      } else {
+        if (row.classList.contains(STALE_CLASS)) row.classList.remove(STALE_CLASS);
       }
     });
   }
@@ -178,6 +200,7 @@
     document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
     weakenPromoRows();
     markLonelyTopics();
+    markStaleTopics();
     injectTimes();
     enhancePosters();
     enhanceOpPosts();
@@ -234,6 +257,15 @@
       td.${ROW_CLASS}--2 { --ld-tle-lv: #1a7f37; }
       td.${ROW_CLASS}--3 { --ld-tle-lv: #d4a72c; }
       td.${ROW_CLASS}--4 { --ld-tle-lv: #8250df; }
+      tr.${STALE_CLASS} td {
+        opacity: .62;
+        filter: grayscale(.35);
+        transition: opacity .15s ease, filter .15s ease;
+      }
+      tr.${STALE_CLASS}:hover td {
+        opacity: .92;
+        filter: none;
+      }
       tr.${PROMO_CLASS} td {
         opacity: .38;
         filter: grayscale(.7);
