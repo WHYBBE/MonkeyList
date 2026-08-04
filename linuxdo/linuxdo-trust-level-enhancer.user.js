@@ -237,7 +237,7 @@
       tr.${PROMO_CLASS} td {
         opacity: .38;
         filter: grayscale(.7);
-        background: linear-gradient(90deg, rgba(178,186,197,.14), rgba(178,186,197,.04));
+        background: rgba(178,186,197,.08);
         transition: opacity .15s ease, filter .15s ease, background .15s ease;
       }
       tr.${PROMO_CLASS} td:first-child {
