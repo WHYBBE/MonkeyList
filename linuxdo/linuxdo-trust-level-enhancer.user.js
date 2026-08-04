@@ -75,8 +75,13 @@
       const usernames = [...postersTd.querySelectorAll('a[data-user-card]')]
         .map((a) => a.getAttribute('data-user-card'));
       const unique = [...new Set(usernames)].filter(Boolean);
-      const isLonely = unique.length > 0 && unique.length === 1;
-      row.classList.toggle(LONELY_CLASS, isLonely);
+      if (unique.length === 0) return;
+      const isLonely = unique.length === 1;
+      if (isLonely) {
+        if (!row.classList.contains(LONELY_CLASS)) row.classList.add(LONELY_CLASS);
+      } else {
+        if (row.classList.contains(LONELY_CLASS)) row.classList.remove(LONELY_CLASS);
+      }
     });
   }
 
