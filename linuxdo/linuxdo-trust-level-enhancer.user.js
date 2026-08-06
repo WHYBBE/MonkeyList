@@ -273,10 +273,12 @@
       td.${ROW_CLASS}--2 { --ld-tle-lv: #1a7f37; }
       td.${ROW_CLASS}--3 { --ld-tle-lv: #d4a72c; }
       td.${ROW_CLASS}--4 { --ld-tle-lv: #8250df; }
+      tr.topic-list-item td {
+        transition: opacity .15s ease, filter .15s ease, background .15s ease;
+      }
       tr.${STALE_CLASS} td {
         opacity: .62;
         filter: grayscale(.35);
-        transition: opacity .15s ease, filter .15s ease;
       }
       tr.${STALE_CLASS}:hover td {
         opacity: .92;
@@ -286,7 +288,6 @@
         opacity: .38;
         filter: grayscale(.7);
         background: rgba(178,186,197,.08);
-        transition: opacity .15s ease, filter .15s ease, background .15s ease;
       }
       tr.${PROMO_CLASS} td:first-child {
         box-shadow: inset 3px 0 0 #9aa4af !important;
