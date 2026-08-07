@@ -125,13 +125,27 @@
 
   function formatCreated(raw) {
     const m = raw.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*(\d{1,2}):(\d{2}))?/);
-    if (!m) return raw;
-    const [, y, mo, d, h, mi] = m;
-    const now = new Date();
+    if (!m) return { text: raw, tier: 'old' };
+    const ts = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : 0, m[5] ? Number(m[5]) : 0).getTime();
+    if (isNaN(ts)) return { text: raw, tier: 'old' };
+    const now = Date.now();
+    const diff = now - ts;
+    const DAY = 24 * 60 * 60 * 1000;
+    const WEEK = 7 * DAY;
+    if (diff < DAY) {
+      const hours = Math.max(1, Math.floor(diff / (60 * 60 * 1000)));
+      return { text: `${hours}小时内`, tier: 'fresh' };
+    }
+    if (diff < WEEK) {
+      const days = Math.floor(diff / DAY);
+      return { text: `${days}天内`, tier: 'week' };
+    }
+    const d = new Date(ts);
     const pad = (n) => String(n).padStart(2, '0');
-    const md = `${pad(Number(mo))}-${pad(Number(d))}`;
-    const hm = h ? ` ${pad(Number(h))}:${mi}` : '';
-    return Number(y) === now.getFullYear() ? md + hm : `${y}-${md}${hm}`;
+    const md = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    return d.getFullYear() === new Date().getFullYear()
+      ? { text: md, tier: 'old' }
+      : { text: `${d.getFullYear()}-${md}`, tier: 'old' };
   }
 
   function injectTimes() {
@@ -144,9 +158,10 @@
       row.setAttribute(TIME_DONE, '');
       const link = activityTd.querySelector('.post-activity');
       if (!link) return;
+      const { text, tier } = formatCreated(created);
       const chip = document.createElement('span');
-      chip.className = TIME_CLASS;
-      chip.textContent = formatCreated(created);
+      chip.className = tier === 'old' ? TIME_CLASS : `${TIME_CLASS} ${TIME_CLASS}--${tier}`;
+      chip.textContent = text;
       chip.title = `发帖于 ${created}`;
       link.insertAdjacentElement('afterend', chip);
     });
@@ -363,6 +378,18 @@
         white-space: nowrap;
         text-align: center;
       }
+      .${TIME_CLASS}--fresh {
+        color: #fff;
+        background: #1a7f37;
+        border-color: #1a7f37;
+        font-weight: 700;
+      }
+      .${TIME_CLASS}--week {
+        color: #0969da;
+        background: #ddf4ff;
+        border-color: #54aeff;
+        font-weight: 600;
+      }
       tr.${PROMO_CLASS} .${TIME_CLASS} { opacity: .7; }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
@@ -380,6 +407,8 @@
         td.${ROW_CLASS}--3 { --ld-tle-lv: #e3b341; }
         td.${ROW_CLASS}--4 { --ld-tle-lv: #8957e5; }
         .${TIME_CLASS} { color: #8b949e; background: #21262d; border-color: #30363d; }
+        .${TIME_CLASS}--fresh { color: #f0f6fc; background: #2ea043; border-color: #2ea043; }
+        .${TIME_CLASS}--week { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
         article.${OP_POST_CLASS} .names .first::after { background: #8957e5; }
         tr.${LONELY_CLASS} td.main-link:not(.${ROW_CLASS}) {
           box-shadow: inset 3px 0 0 0 #9e6a03 !important;
