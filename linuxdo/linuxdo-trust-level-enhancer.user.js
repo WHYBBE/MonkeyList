@@ -15,6 +15,7 @@
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
   const PROMO_CLASS = 'ld-tle-promo';
+  const LOTTERY_CLASS = 'ld-tle-lottery';
   const LONELY_CLASS = 'ld-tle-lonely';
   const STALE_CLASS = 'ld-tle-stale';
   const WELFARE_BADGE_CLASS = 'ld-tle-welfare';
@@ -24,6 +25,7 @@
   const OP_POST_CLASS = 'ld-tle-op-post';
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
+  const LOTTERY_TAGS = ['抽奖'];
 
   let opUserId = null;
   let cachedTopicId = null;
@@ -75,7 +77,9 @@
       const tagNames = [...row.querySelectorAll('a.discourse-tag[data-tag-name]')]
         .map((a) => a.getAttribute('data-tag-name'));
       const isPromo = PROMO_TAGS.some((t) => tagNames.includes(t));
+      const isLottery = LOTTERY_TAGS.some((t) => tagNames.includes(t));
       row.classList.toggle(PROMO_CLASS, isPromo);
+      row.classList.toggle(LOTTERY_CLASS, isLottery && !isPromo);
     });
   }
 
@@ -318,6 +322,25 @@
         background: transparent;
       }
       tr.${PROMO_CLASS}:hover .raw-topic-link { text-decoration: none; }
+      tr.${LOTTERY_CLASS} td {
+        opacity: .5;
+        filter: grayscale(.5);
+        background: rgba(130,80,223,.06);
+      }
+      tr.${LOTTERY_CLASS} td:first-child {
+        box-shadow: inset 3px 0 0 #8250df !important;
+      }
+      tr.${LOTTERY_CLASS} .raw-topic-link {
+        text-decoration: line-through;
+        text-decoration-color: rgba(130,80,223,.5);
+        text-decoration-thickness: 1.5px;
+      }
+      tr.${LOTTERY_CLASS}:hover td {
+        opacity: .88;
+        filter: none;
+        background: transparent;
+      }
+      tr.${LOTTERY_CLASS}:hover .raw-topic-link { text-decoration: none; }
       img.ld-tle-op {
         box-shadow: 0 0 0 2px #8a9199 !important;
         transition: box-shadow .15s ease;
