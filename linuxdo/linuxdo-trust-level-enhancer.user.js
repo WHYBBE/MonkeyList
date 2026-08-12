@@ -23,6 +23,7 @@
   const TIME_DONE = 'data-ld-tle-timedone';
   const POSTERS_DONE = 'data-ld-tle-postersdone';
   const OP_POST_CLASS = 'ld-tle-op-post';
+  const JUMP_CLASS = 'ld-tle-jump';
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
@@ -224,6 +225,42 @@
     });
   }
 
+  function addReplyJumpLinks() {
+    document.querySelectorAll('article[id^="post_"]').forEach((post) => {
+      const replyToTab = post.querySelector('.post-infos .reply-to-tab');
+      if (!replyToTab || replyToTab.previousElementSibling?.classList.contains(JUMP_CLASS)) return;
+      const btn = document.createElement('a');
+      btn.className = `${JUMP_CLASS} post-info arrow`;
+      btn.href = '#';
+      btn.title = '跳到被回复的帖子';
+      btn.innerHTML = '<svg class="fa d-icon d-icon-arrow-up svg-icon fa-width-auto svg-string" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><use href="#arrow-up"></use></svg> 跳转';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.dataset.ldTleJumping === '1') return;
+        btn.dataset.ldTleJumping = '1';
+        const link = post.querySelector('.post__embedded-posts--top .post-link-arrow a');
+        if (link) { location.href = link.getAttribute('href') || '#'; return; }
+        replyToTab.setAttribute('aria-expanded', 'true');
+        replyToTab.click();
+        let tries = 0;
+        const check = setInterval(() => {
+          tries++;
+          const found = post.querySelector('.post__embedded-posts--top .post-link-arrow a');
+          if (found) {
+            clearInterval(check);
+            btn.dataset.ldTleJumping = '0';
+            location.href = found.getAttribute('href') || '#';
+          } else if (tries > 25) {
+            clearInterval(check);
+            btn.dataset.ldTleJumping = '0';
+          }
+        }, 200);
+      }, true);
+      replyToTab.insertAdjacentElement('beforebegin', btn);
+    });
+  }
+
   function processPage() {
     addStyles();
     document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
@@ -234,6 +271,7 @@
     injectTimes();
     enhancePosters();
     enhanceOpPosts();
+    addReplyJumpLinks();
   }
 
   let processingScheduled = false;
@@ -389,6 +427,12 @@
         font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         vertical-align: middle;
       }
+      .${JUMP_CLASS} {
+        margin-right: 4px;
+        opacity: .7;
+        font-size: .85em;
+      }
+      .${JUMP_CLASS}:hover { opacity: 1; }
       .${TIME_CLASS} {
         display: block;
         margin-top: 3px;
