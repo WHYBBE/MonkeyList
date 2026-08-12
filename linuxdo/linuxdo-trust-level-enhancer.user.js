@@ -239,22 +239,19 @@
         e.stopPropagation();
         if (btn.dataset.ldTleJumping === '1') return;
         btn.dataset.ldTleJumping = '1';
-        const link = post.querySelector('.post__embedded-posts--top .post-link-arrow a');
-        if (link) { location.href = link.getAttribute('href') || '#'; return; }
+        const jump = () => {
+          const link = post.querySelector('.post__embedded-posts--top .post-link-arrow a');
+          if (link) { link.click(); return true; }
+          return false;
+        };
+        if (jump()) return;
         replyToTab.setAttribute('aria-expanded', 'true');
         replyToTab.click();
         let tries = 0;
         const check = setInterval(() => {
           tries++;
-          const found = post.querySelector('.post__embedded-posts--top .post-link-arrow a');
-          if (found) {
-            clearInterval(check);
-            btn.dataset.ldTleJumping = '0';
-            location.href = found.getAttribute('href') || '#';
-          } else if (tries > 25) {
-            clearInterval(check);
-            btn.dataset.ldTleJumping = '0';
-          }
+          if (jump()) { clearInterval(check); btn.dataset.ldTleJumping = '0'; }
+          else if (tries > 25) { clearInterval(check); btn.dataset.ldTleJumping = '0'; }
         }, 200);
       }, true);
       replyToTab.insertAdjacentElement('beforebegin', btn);
