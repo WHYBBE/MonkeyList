@@ -358,7 +358,7 @@
         opacity: .85 !important;
         filter: none !important;
       }
-      article.${OP_POST_CLASS} .names .first::after {
+      article.${OP_POST_CLASS} .post__body > .topic-meta-data .names .first::after {
         content: '楼主';
         display: inline-flex;
         align-items: center;
@@ -432,7 +432,7 @@
         .${TIME_CLASS} { color: #8b949e; background: #21262d; border-color: #30363d; }
         .${TIME_CLASS}--fresh { color: #f0f6fc; background: #2ea043; border-color: #2ea043; }
         .${TIME_CLASS}--week { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
-        article.${OP_POST_CLASS} .names .first::after { background: #8957e5; }
+        article.${OP_POST_CLASS} .post__body > .topic-meta-data .names .first::after { background: #8957e5; }
         tr.${LONELY_CLASS} td.main-link:not(.${ROW_CLASS}) {
           box-shadow: inset 3px 0 0 0 #9e6a03 !important;
         }
