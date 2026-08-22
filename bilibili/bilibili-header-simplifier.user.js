@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bilibili Header Simplifier
 // @namespace    https://www.bilibili.com/
-// @version      0.5.0
+// @version      0.7.0
 // @description  Simplify the bilibili header right navigation across all bilibili subdomains: keep only Home (首页), Dynamics (动态), Watch Later (稍后再看), and History (历史); hide everything else including the VIP button. Adds an expand toggle to temporarily restore all entries.
 // @match        https://www.bilibili.com/*
 // @match        https://t.bilibili.com/*
@@ -19,26 +19,27 @@
   const STYLE_ID = 'bili-header-simplifier-style';
   const KEEP_CLASS = 'bili-hs-keep';
   const TOGGLE_LI_CLASS = 'bili-hs-toggle-li';
+  const HOME_CLASS = 'bili-hs-home-entry';
   const WATCHLATER_CLASS = 'bili-hs-watchlater-entry';
   const EXPANDED_CLASS = 'bili-hs-expanded';
 
   const css = `
-    /* Hide all top-level <li> entries (and vip-wrap div) inside the right-entry bar … */
     ul.right-entry > li,
     ul.right-entry > .vip-wrap {
       display: none !important;
     }
-    /* … then re-show the ones we want to keep */
-    ul.right-entry > li.${KEEP_CLASS} {
-      display: list-item !important;
+    ul.right-entry > li.${KEEP_CLASS},
+    ul.right-entry > li:has(a[href*="t.bilibili.com"]),
+    ul.right-entry > li:has(a[href*="/history"]) {
+      display: flex !important;
+      align-items: center;
+      flex-shrink: 0;
     }
-    /* The dynamically-injected Watch Later entry */
     .${WATCHLATER_CLASS} {
       display: flex !important;
       align-items: center;
       gap: 4px;
     }
-    /* Expand toggle button */
     .bili-hs-toggle {
       display: flex !important;
       align-items: center;
@@ -46,21 +47,21 @@
       width: 40px;
       height: 40px;
       cursor: pointer;
-      color: var(--text2, #18191c);
+      color: inherit;
       border-radius: 50%;
       transition: background 0.2s;
       user-select: none;
     }
     .bili-hs-toggle:hover {
-      background: var(--graph_bg_regular, #f1f2f3);
+      background: color-mix(in srgb, currentColor 12%, transparent);
     }
     .bili-hs-toggle svg {
       transition: transform 0.25s ease;
     }
-    /* Expanded mode: show all original entries, hide toggle */
     ul.right-entry.${EXPANDED_CLASS} > li,
     ul.right-entry.${EXPANDED_CLASS} > .vip-wrap {
-      display: list-item !important;
+      display: flex !important;
+      align-items: center;
     }
     ul.right-entry.${EXPANDED_CLASS} > .${TOGGLE_LI_CLASS} {
       display: none !important;
@@ -77,7 +78,7 @@
 
   function createHomeEntry() {
     const li = document.createElement('li');
-    li.className = `right-entry-item ${KEEP_CLASS} bili-hs-home-entry`;
+    li.className = `right-entry-item ${KEEP_CLASS} ${HOME_CLASS}`;
     const a = document.createElement('a');
     a.href = 'https://www.bilibili.com';
     a.className = 'right-entry__outside';
@@ -131,42 +132,57 @@
     return li;
   }
 
-  function isProcessed(ul) {
-    return ul.querySelector(':scope > li.' + TOGGLE_LI_CLASS) !== null;
+  function isInjected(li) {
+    return li.classList.contains(HOME_CLASS)
+      || li.classList.contains(WATCHLATER_CLASS)
+      || li.classList.contains(TOGGLE_LI_CLASS);
   }
 
-  function process() {
-    const ul = document.querySelector('ul.right-entry');
-    if (!ul) return;
-    if (isProcessed(ul)) return;
+  function itemHref(li) {
+    return (li.querySelector('a') || {}).href || '';
+  }
 
-    addStyles();
+  function isDynItem(li) {
+    if (isInjected(li)) return false;
+    return (li.textContent || '').includes('动态') || itemHref(li).includes('t.bilibili.com');
+  }
 
-    const lis = ul.querySelectorAll(':scope > li');
+  function isHistItem(li) {
+    if (isInjected(li)) return false;
+    return (li.textContent || '').includes('历史') || /\/history(?:\/|$|\?)/.test(itemHref(li));
+  }
 
-    lis.forEach((li) => {
-      if (li.classList.contains(KEEP_CLASS)) return;
-      const text = li.textContent || '';
-      if (text.includes('动态') || text.includes('历史')) {
-        li.classList.add(KEEP_CLASS);
-      }
+  function nativeItems(ul) {
+    return Array.from(ul.querySelectorAll(':scope > li')).filter((li) => !isInjected(li));
+  }
+
+  function isHeaderReady(ul) {
+    const items = nativeItems(ul);
+    if (!items.some(isDynItem) || !items.some(isHistItem)) return false;
+    const searchBox = document.querySelector('.center-search-container');
+    if (searchBox && !searchBox.querySelector('input, form, .nav-search-content, .nav-search-form')) {
+      return false;
+    }
+    return true;
+  }
+
+  function processUl(ul) {
+    if (!isHeaderReady(ul)) return;
+
+    nativeItems(ul).forEach((li) => {
+      if (isDynItem(li) || isHistItem(li)) li.classList.add(KEEP_CLASS);
     });
 
-    if (!ul.querySelector(':scope > li.bili-hs-home-entry')) {
+    const dyn = nativeItems(ul).find(isDynItem);
+
+    if (!ul.querySelector(':scope > li.' + HOME_CLASS)) {
       const home = createHomeEntry();
-      const dyn = Array.from(ul.querySelectorAll(':scope > li'))
-        .find((li) => (li.textContent || '').includes('动态'));
-      if (dyn) {
-        ul.insertBefore(home, dyn);
-      } else {
-        ul.appendChild(home);
-      }
+      if (dyn) ul.insertBefore(home, dyn);
+      else ul.insertBefore(home, ul.firstChild);
     }
 
     if (!ul.querySelector(':scope > li.' + WATCHLATER_CLASS)) {
       const watchLater = createWatchLaterEntry();
-      const dyn = Array.from(ul.querySelectorAll(':scope > li.' + KEEP_CLASS))
-        .find((li) => (li.textContent || '').includes('动态'));
       if (dyn && dyn.nextElementSibling) {
         ul.insertBefore(watchLater, dyn.nextElementSibling);
       } else {
@@ -174,9 +190,13 @@
       }
     }
 
-    if (!isProcessed(ul)) {
+    if (!ul.querySelector(':scope > li.' + TOGGLE_LI_CLASS)) {
       ul.appendChild(createToggleEntry(ul));
     }
+  }
+
+  function process() {
+    document.querySelectorAll('ul.right-entry').forEach(processUl);
   }
 
   function init() {
