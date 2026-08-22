@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.15.0
+// @version      0.17.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -498,58 +498,76 @@
     renderPanelList();
   }
 
+  function setPanelPane(name) {
+    if (!panelEl) return;
+    panelEl.querySelectorAll('.ld-tle-panel__nav button').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.pane === name);
+    });
+    panelEl.querySelectorAll('.ld-tle-panel__pane').forEach((pane) => {
+      pane.classList.toggle('is-active', pane.dataset.pane === name);
+    });
+  }
+
   function ensurePanel() {
     if (panelEl) return;
     panelEl = document.createElement('div');
     panelEl.className = 'ld-tle-panel';
     panelEl.innerHTML = `
       <div class="ld-tle-panel__bar">
-        <strong>用户标记</strong>
-        <span class="ld-tle-panel__count"></span>
-        <button type="button" data-act="close">关闭</button>
+        <div><strong>用户标记</strong><span class="ld-tle-panel__subtitle">本地保存，仅你可见</span></div>
+        <button type="button" data-act="close" aria-label="关闭">关闭</button>
       </div>
-      <div class="ld-tle-panel__sec">主分类（控制列表高亮）</div>
-      <div class="ld-tle-panel__cats"></div>
-      <div class="ld-tle-panel__cat-add">
-        <input type="text" class="ld-tle-panel__cat-label" placeholder="新分类名">
-        <input type="color" class="ld-tle-panel__cat-color" value="#0969da" title="颜色">
-        <select class="ld-tle-panel__cat-effect">
-          <option value="normal">普通</option>
-          <option value="tint">高亮</option>
-          <option value="dim">弱化</option>
-        </select>
-        <button type="button" data-act="add-cat">加分类</button>
+      <div class="ld-tle-panel__nav" role="tablist">
+        <button type="button" class="is-active" data-pane="users">用户 <span class="ld-tle-panel__count"></span></button>
+        <button type="button" data-pane="labels">分类与标签</button>
+        <button type="button" data-pane="data">导入导出</button>
       </div>
-      <div class="ld-tle-panel__sec">子标签（贴在用户名旁）</div>
-      <div class="ld-tle-panel__tags"></div>
-      <div class="ld-tle-panel__tag-add">
-        <input type="text" class="ld-tle-panel__tag-label" placeholder="新标签名">
-        <input type="color" class="ld-tle-panel__tag-color" value="#8250df" title="颜色">
-        <button type="button" data-act="add-tag">加标签</button>
-      </div>
-      <div class="ld-tle-panel__tools">
-        <input type="search" class="ld-tle-panel__q" placeholder="搜索用户 / 备注">
-        <select class="ld-tle-panel__filter"></select>
-      </div>
-      <div class="ld-tle-panel__add">
-        <input type="text" class="ld-tle-panel__user" placeholder="用户名">
-        <select class="ld-tle-panel__lv"></select>
-        <button type="button" data-act="add">添加</button>
-      </div>
-      <div class="ld-tle-panel__list"></div>
-      <div class="ld-tle-panel__io">
-        <textarea class="ld-tle-panel__json" rows="5" placeholder="在此粘贴 JSON 以导入，或点导出填入"></textarea>
+      <section class="ld-tle-panel__pane is-active" data-pane="users">
+        <div class="ld-tle-panel__add ld-tle-panel__card">
+          <input type="text" class="ld-tle-panel__user" placeholder="输入用户名">
+          <select class="ld-tle-panel__lv"></select>
+          <button type="button" data-act="add">添加标记</button>
+        </div>
+        <div class="ld-tle-panel__tools">
+          <input type="search" class="ld-tle-panel__q" placeholder="搜索用户名或备注">
+          <select class="ld-tle-panel__filter"></select>
+        </div>
+        <div class="ld-tle-panel__list"></div>
+      </section>
+      <section class="ld-tle-panel__pane" data-pane="labels">
+        <div class="ld-tle-panel__section-head"><div><strong>主分类</strong><span>控制话题列表效果</span></div></div>
+        <div class="ld-tle-panel__cats"></div>
+        <div class="ld-tle-panel__cat-add ld-tle-panel__card">
+          <input type="text" class="ld-tle-panel__cat-label" placeholder="新分类名">
+          <input type="color" class="ld-tle-panel__cat-color" value="#0969da" title="颜色">
+          <select class="ld-tle-panel__cat-effect"><option value="normal">普通</option><option value="tint">高亮</option><option value="dim">弱化</option></select>
+          <button type="button" data-act="add-cat">添加</button>
+        </div>
+        <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>显示在用户名旁，可多选</span></div></div>
+        <div class="ld-tle-panel__tags"></div>
+        <div class="ld-tle-panel__tag-add ld-tle-panel__card">
+          <input type="text" class="ld-tle-panel__tag-label" placeholder="新标签名">
+          <input type="color" class="ld-tle-panel__tag-color" value="#8250df" title="颜色">
+          <button type="button" data-act="add-tag">添加</button>
+        </div>
+      </section>
+      <section class="ld-tle-panel__pane" data-pane="data">
+        <div class="ld-tle-panel__section-head"><div><strong>备份与迁移</strong><span>导出包含分类、子标签和用户标记</span></div></div>
+        <textarea class="ld-tle-panel__json" rows="10" placeholder="粘贴导出的 JSON 数据"></textarea>
         <div class="ld-tle-panel__btns">
-          <button type="button" data-act="export">导出</button>
-          <button type="button" data-act="import-merge">导入合并</button>
-          <button type="button" data-act="import-skip">导入跳过已有</button>
-          <button type="button" data-act="import-replace">导入覆盖</button>
+          <button type="button" data-act="export">导出 JSON</button>
+          <button type="button" data-act="import-merge">合并导入</button>
+          <button type="button" data-act="import-skip">跳过已有</button>
+          <button type="button" data-act="import-replace">覆盖导入</button>
           <button type="button" data-act="dedup">去重</button>
         </div>
-        <div class="ld-tle-panel__msg"></div>
-      </div>
+      </section>
+      <div class="ld-tle-panel__msg" aria-live="polite"></div>
     `;
     panelEl.querySelector('[data-act="close"]').addEventListener('click', () => panelEl.classList.remove('is-open'));
+    panelEl.querySelectorAll('.ld-tle-panel__nav button').forEach((button) => {
+      button.addEventListener('click', () => setPanelPane(button.dataset.pane));
+    });
     panelEl.querySelector('.ld-tle-panel__q').addEventListener('input', renderPanelList);
     panelEl.querySelector('.ld-tle-panel__filter').addEventListener('change', renderPanelList);
     panelEl.querySelector('[data-act="export"]').addEventListener('click', () => {
@@ -749,7 +767,7 @@
       const del = document.createElement('button');
       del.type = 'button';
       del.textContent = '删';
-      color.addEventListener('input', () => updateTag(t.id, { color: color.value }));
+      color.addEventListener('change', () => updateTag(t.id, { color: color.value }));
       label.addEventListener('change', () => updateTag(t.id, { label: label.value }));
       del.addEventListener('click', () => removeTag(t.id));
       row.append(color, label, del);
@@ -776,7 +794,7 @@
       const del = document.createElement('button');
       del.type = 'button';
       del.textContent = '删';
-      color.addEventListener('input', () => updateCategory(c.id, { color: color.value }));
+      color.addEventListener('change', () => updateCategory(c.id, { color: color.value }));
       label.addEventListener('change', () => updateCategory(c.id, { label: label.value }));
       effect.addEventListener('change', () => updateCategory(c.id, { effect: effect.value }));
       del.addEventListener('click', () => removeCategory(c.id));
@@ -1420,11 +1438,22 @@
         font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
       }
       .ld-tle-panel.is-open { display: block; }
-      .ld-tle-panel__bar { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #eaeef2; }
-      .ld-tle-panel__bar strong { font-size: 15px; }
-      .ld-tle-panel__count { margin-right: auto; color: #57606a; font-size: 12px; }
-      .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add, .ld-tle-panel__tag-add { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-      .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label, .ld-tle-panel__tag-add .ld-tle-panel__tag-label { flex: 1; padding: 4px 8px; }
+      .ld-tle-panel__bar { position: sticky; top: -16px; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 0 12px; margin-bottom: 0; border-bottom: 1px solid #eaeef2; background: #fff; }
+      .ld-tle-panel__bar strong { display: block; font-size: 16px; letter-spacing: -.01em; }
+      .ld-tle-panel__subtitle { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
+      .ld-tle-panel__bar button { padding: 5px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
+      .ld-tle-panel__nav { display: flex; gap: 3px; padding: 10px 0 2px; border-bottom: 1px solid #eaeef2; }
+      .ld-tle-panel__nav button { flex: 1; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #57606a; font-weight: 600; cursor: pointer; }
+      .ld-tle-panel__nav button.is-active { border-color: #0969da; color: #0969da; }
+      .ld-tle-panel__count { display: inline-flex; min-width: 20px; justify-content: center; margin-left: 4px; padding: 1px 5px; border-radius: 999px; background: #eef2f6; color: #57606a; font-size: 11px; }
+      .ld-tle-panel__pane { display: none; padding-top: 14px; }
+      .ld-tle-panel__pane.is-active { display: block; }
+      .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add, .ld-tle-panel__tag-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+      .ld-tle-panel__card { padding: 10px; border: 1px solid #e1e6eb; border-radius: 8px; background: #f8fafc; }
+      .ld-tle-panel__section-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
+      .ld-tle-panel__section-head strong { display: block; font-size: 13px; }
+      .ld-tle-panel__section-head span { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
+      .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label, .ld-tle-panel__tag-add .ld-tle-panel__tag-label { flex: 1 1 140px; padding: 7px 10px; }
       .ld-tle-panel__sec { padding: 9px 10px 7px; margin: 14px 0 8px; border-bottom: 1px solid #eaeef2; color: #24292f; font-size: 12px; font-weight: 700; }
       .ld-tle-panel__cats, .ld-tle-panel__tags { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
       .ld-tle-panel__cat { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px 38px; gap: 7px; align-items: center; padding: 5px 0; }
@@ -1437,19 +1466,29 @@
         background: #fff;
         color: inherit;
       }
-      .ld-tle-panel__q { flex: 1; padding: 4px 8px; }
-      .ld-tle-panel__list { max-height: 270px; overflow: auto; margin: 10px 0 12px; padding: 2px; }
+      .ld-tle-panel__q { flex: 1; padding: 7px 10px; }
+      .ld-tle-panel__tools select { min-width: 112px; padding: 7px 8px; }
+      .ld-tle-panel__add select, .ld-tle-panel__cat-add select { min-width: 82px; padding: 7px 8px; }
+      .ld-tle-panel__add button, .ld-tle-panel__cat-add button, .ld-tle-panel__tag-add button { padding: 7px 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
+      .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover, .ld-tle-panel__tag-add button:hover { background: #0757b8 !important; }
+      .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
+      .ld-tle-panel__list { max-height: 390px; overflow: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__row { display: grid; grid-template-columns: minmax(88px, 1fr) 92px minmax(100px, 1.5fr) minmax(90px, 1fr) 38px; gap: 7px; align-items: center; padding: 7px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
-      .ld-tle-panel__btns button, .ld-tle-panel__bar button, .ld-tle-panel__row button { padding: 4px 8px; cursor: pointer; }
+      .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
+      .ld-tle-panel__btns button, .ld-tle-panel__row button { padding: 6px 9px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
+      .ld-tle-panel__btns button:first-child { border-color: #0969da; color: #0969da; font-weight: 700; }
+      .ld-tle-panel__btns button:hover, .ld-tle-panel__row button:hover { background: #f6f8fa; }
       .ld-tle-panel__msg { min-height: 1.2em; color: #57606a; font-size: 12px; }
       .ld-tle-panel__empty { color: #8b949e; padding: 12px 0; text-align: center; }
+      .ld-tle-panel__msg { padding-top: 8px; color: #57606a; }
       @media (max-width: 620px) {
         .ld-tle-panel { right: 10px; bottom: 54px; width: calc(100vw - 20px); padding: 12px; }
+        .ld-tle-panel__bar { top: -12px; }
         .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
         .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
       }
@@ -1489,6 +1528,15 @@
           background: #0d1117; border-color: #30363d; color: #c9d1d9;
         }
         .ld-tle-fab { background: #c9d1d9; color: #0d1117; }
+        .ld-tle-panel__bar { background: #161b22; border-color: #30363d; }
+        .ld-tle-panel__nav { border-color: #30363d; }
+        .ld-tle-panel__nav button { color: #8b949e; }
+        .ld-tle-panel__nav button.is-active { color: #58a6ff; border-color: #58a6ff; }
+        .ld-tle-panel__card { border-color: #30363d; background: #0d1117; }
+        .ld-tle-panel__section-head span, .ld-tle-panel__subtitle { color: #8b949e; }
+        .ld-tle-panel__list { border-color: #30363d; }
+        .ld-tle-panel__bar button, .ld-tle-panel__btns button, .ld-tle-panel__row button { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
+        .ld-tle-panel__sec, .ld-tle-panel__btns { border-color: #30363d; }
       }
     `;
     document.head.append(style);
