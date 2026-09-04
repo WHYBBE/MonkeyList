@@ -178,6 +178,13 @@
     }).filter((effect) => effect && effect.enabled !== false);
   }
 
+  function tagEffects(mark) {
+    return normalizeTagIds(mark && mark.tags).map((id) => {
+      const tag = getTag(id);
+      return tag ? { id: `tag-${tag.id}`, label: tag.label, kind: 'badge', color: tag.color, hint: tag.label, enabled: true } : null;
+    }).filter(Boolean);
+  }
+
   function normalizeTag(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
@@ -399,7 +406,7 @@
   }
 
   function setEffectBadge(host, effect, keyword) {
-    const selected = Array.isArray(effect) ? effect : [effect];
+    const selected = (Array.isArray(effect) ? effect : [effect]).filter((item) => item && item.kind === 'badge');
     if (!host || !selected.length) return;
     let badge = host.querySelector(':scope > .ld-tle-keyword-badge');
     if (!badge) {
@@ -450,13 +457,15 @@
 
   function paintBadges(host, mark, username) {
     if (!host) return;
-    const markEffects = mark ? boundEffects(mark.effects || mark.effect || mark.level) : [];
-    const tagIds = mark ? normalizeTagIds(mark.tags) : [];
+    const markEffects = mark ? [...boundEffects(mark.effects || mark.effect || mark.level), ...tagEffects(mark)] : [];
+    const tagIds = [];
     const wanted = [];
-    markEffects.forEach((effect) => wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label }));
+    markEffects.filter((effect) => effect.kind === 'badge').forEach((effect) => {
+      wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label });
+    });
     tagIds.forEach((id) => {
       const t = getTag(id);
-      if (t) wanted.push({ kind: 'tag', id: t.id, label: t.label, title: t.label });
+      if (t) wanted.push({ kind: 'tag', id: t.id, label: t.label, title: t.label, color: t.color });
     });
     [...host.children].forEach((el) => {
       if (el.classList.contains(MARK_BADGE) || el.classList.contains(MARK_ADD)) return;
@@ -2009,6 +2018,7 @@
     }).concat(tags.map((t) => {
       const fg = contrastColor(t.color);
       return `
+        .${MARK_BADGE}--effect-tag-${t.id} { color: ${fg}; background: ${t.color}; }
         .${MARK_BADGE}--tag-${t.id} { color: ${fg}; background: ${t.color}; }
         .ld-tle-picker__tag--${t.id}.is-on { color: ${fg}; background: ${t.color}; border-color: ${t.color}; }
       `;
