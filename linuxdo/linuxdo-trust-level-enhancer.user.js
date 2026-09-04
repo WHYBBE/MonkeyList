@@ -36,11 +36,11 @@
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
   const DEFAULT_CATS = [
-    { id: 'block', label: '屏蔽', color: '#6e7681', effect: 'dim', effectId: 'promo-dim', hint: '弱化显示' },
-    { id: 'caution', label: '注意', color: '#d4a72c', effect: 'tint', effectId: 'rich', hint: '黄色警示' },
-    { id: 'watch', label: '关注', color: '#0969da', effect: 'tint', effectId: 'normal', hint: '蓝色高亮' },
-    { id: 'friend', label: '友好', color: '#1a7f37', effect: 'tint', effectId: 'normal', hint: '绿色高亮' },
-    { id: 'vip', label: '重要', color: '#d4a72c', effect: 'tint', effectId: 'rich', hint: '金色强调' },
+    { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], hint: '弱化显示' },
+    { id: 'caution', label: '注意', effectIds: ['rich'], hint: '黄色警示' },
+    { id: 'watch', label: '关注', effectIds: ['lv1'], hint: '蓝色高亮' },
+    { id: 'friend', label: '友好', effectIds: ['lv2'], hint: '绿色高亮' },
+    { id: 'vip', label: '重要', effectIds: ['rich'], hint: '金色强调' },
   ];
   const DEFAULT_EFFECTS = [
     { id: 'normal', label: '无额外效果', color: '#6e7681', mode: 'normal', kind: 'none', priority: 0, hint: '只显示标记' },
@@ -73,20 +73,18 @@
   let panelEl = null;
 
   cats.forEach((group) => {
-    if (!group.effectId || !getEffect(group.effectId)) {
-      group.effectId = getEffect(group.id) ? group.id : effects[0].id;
-    }
+    group.effectIds = (group.effectIds || [group.effectId]).filter((id) => getEffect(id));
+    if (!group.effectIds.length) group.effectIds = [effects[0].id];
   });
 
   function normalizeCat(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
     const label = String(raw.label || raw.name || '').trim();
-    const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '#0969da';
-    const effect = ['normal', 'tint', 'dim'].includes(raw.effect) ? raw.effect : 'tint';
     const hint = String(raw.hint || '').trim();
     if (!id || !label) return null;
-    return { id, label, color, effect, effectId: String(raw.effectId || id), hint };
+    const effectIds = Array.isArray(raw.effectIds) ? raw.effectIds : [raw.effectId || raw.id];
+    return { id, label, effectIds: effectIds.map(String), hint };
   }
 
   function loadCats() {
@@ -129,20 +127,8 @@
       const raw = JSON.parse(localStorage.getItem(EFFECTS_KEY) || 'null');
       const saved = Array.isArray(raw) ? raw.map(normalizeEffect).filter(Boolean) : [];
       const byId = new Map(DEFAULT_EFFECTS.map((effect) => [effect.id, { ...effect }]));
-      // Keep all existing user categories usable as effects after the migration.
-      cats.forEach((cat) => byId.set(cat.id, normalizeEffect({
-        id: cat.id,
-        label: cat.label,
-        color: cat.color,
-        mode: cat.effect,
-        hint: cat.hint,
-      })));
       saved.forEach((effect) => {
-        if (isBuiltinEffect(effect.id)) {
-          byId.get(effect.id).enabled = effect.enabled !== false;
-        } else {
-          byId.set(effect.id, { ...effect, builtin: false });
-        }
+        if (isBuiltinEffect(effect.id)) byId.get(effect.id).enabled = effect.enabled !== false;
       });
       return [...byId.values()];
     } catch (e) {
@@ -168,12 +154,17 @@
     if (direct) return direct;
     const cat = getCat(value);
     if (!cat) return null;
-    return getEffect(cat.effectId) || { id: `category-${cat.id}`, label: cat.label, color: cat.color, mode: cat.effect, hint: cat.hint };
+    return boundEffects(cat.effectIds)[0] || null;
   }
 
   function boundEffects(value) {
     const ids = Array.isArray(value) ? value : [value];
-    return ids.map((id) => boundEffect(id)).filter(Boolean).filter((effect) => effect.enabled !== false);
+    return ids.flatMap((id) => {
+      const direct = getEffect(id);
+      if (direct) return [direct];
+      const cat = getCat(id);
+      return cat ? boundEffects(cat.effectIds) : [];
+    }).filter((effect) => effect && effect.enabled !== false);
   }
 
   function normalizeTag(raw) {
@@ -205,11 +196,10 @@
   function loadKeywordRules() {
     try {
       const raw = JSON.parse(localStorage.getItem(KEYWORDS_KEY) || '[]');
-      return Array.isArray(raw) ? raw.filter((r) => r && r.keyword && (r.effect || r.category)).map((r, index) => ({
+      return Array.isArray(raw) ? raw.filter((r) => r && r.keyword && (r.effectIds || r.effects || r.effect || r.category)).map((r, index) => ({
         id: String(r.id || `rule-${index + 1}`),
         keyword: String(r.keyword).trim(),
-        category: String(r.category || r.effect),
-        effect: String(r.effect || r.category),
+        effectIds: (Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]).map(String),
         enabled: r.enabled !== false,
       })) : [];
     } catch (e) {
@@ -225,8 +215,8 @@
     const title = row.querySelector('.raw-topic-link, .title, .link-top-line')?.textContent || '';
     const tagsText = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')].map((el) => el.textContent).join(' ');
     const haystack = `${title} ${tagsText}`.toLowerCase();
-    const rule = keywordRules.find((r) => r.enabled && r.keyword && haystack.includes(r.keyword.toLowerCase()) && boundEffects(r.effects || r.effect || r.category).length);
-    return rule ? { rule, effects: boundEffects(rule.effects || rule.effect || rule.category) } : null;
+    const rule = keywordRules.find((r) => r.enabled && r.keyword && haystack.includes(r.keyword.toLowerCase()) && boundEffects(r.effectIds).length);
+    return rule ? { rule, effects: boundEffects(rule.effectIds) } : null;
   }
 
   function moveKeywordRule(id, direction) {
@@ -290,10 +280,12 @@
       delete marks[user];
     } else if (getCat(level) || getEffect(level)) {
       const prev = marks[user] || {};
+      const effectIds = opts && Array.isArray(opts.effects)
+        ? opts.effects.map(String).filter((id) => getEffect(id) || getCat(id))
+        : (prev.effects || [prev.effect || level]).map(String);
       marks[user] = {
         level,
-        effect: opts && opts.effect ? opts.effect : (prev.effect || level),
-        effects: opts && opts.effects ? opts.effects.map(String) : (prev.effects || [prev.effect || level]),
+        effects: effectIds.length ? effectIds : [level],
         note: note != null ? String(note) : (prev.note || ''),
         tags: opts && opts.tags != null ? normalizeTagIds(opts.tags) : (prev.tags || []),
         at: Date.now(),
@@ -353,7 +345,7 @@
       const title = row.querySelector('.link-top-line, td.main-link');
       title?.querySelectorAll('.ld-tle-keyword-badge').forEach((el) => el.remove());
       paintBadges(title, mark, null);
-      if (keywordMatch && !mark) setEffectBadge(title, keywordMatch.effects[0], keywordMatch.rule.keyword);
+       if (keywordMatch && !mark) setEffectBadge(title, keywordMatch.effects, keywordMatch.rule.keyword);
     });
 
     document.querySelectorAll('article[id^="post_"]').forEach((post) => {
@@ -396,15 +388,16 @@
   }
 
   function setEffectBadge(host, effect, keyword) {
-    if (!host || !effect) return;
+    const selected = Array.isArray(effect) ? effect : [effect];
+    if (!host || !selected.length) return;
     let badge = host.querySelector(':scope > .ld-tle-keyword-badge');
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'ld-tle-keyword-badge';
       host.append(badge);
     }
-    badge.className = `ld-tle-keyword-badge ${MARK_BADGE} ${MARK_BADGE}--effect-${effect.id}`;
-    badge.textContent = effect.label;
+    badge.className = `ld-tle-keyword-badge ${MARK_BADGE} ${selected.map((item) => `${MARK_BADGE}--effect-${item.id}`).join(' ')}`;
+    badge.textContent = selected.map((item) => item.label).join(' + ');
     badge.title = `关键词：${keyword}`;
   }
 
@@ -446,10 +439,10 @@
 
   function paintBadges(host, mark, username) {
     if (!host) return;
-    const effect = mark && boundEffect(mark.effect || mark.level);
+    const markEffects = mark ? boundEffects(mark.effects || mark.effect || mark.level) : [];
     const tagIds = mark ? normalizeTagIds(mark.tags) : [];
     const wanted = [];
-    if (effect) wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label });
+    markEffects.forEach((effect) => wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label }));
     tagIds.forEach((id) => {
       const t = getTag(id);
       if (t) wanted.push({ kind: 'tag', id: t.id, label: t.label, title: t.label });
@@ -587,15 +580,15 @@
         at: item.at || Date.now(),
       });
     }
-    const importedEffects = Array.isArray(data && data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
+    const importedEffects = [];
     const importedCats = Array.isArray(data && data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
     const importedTags = Array.isArray(data && data.tags) ? data.tags.map(normalizeTag).filter(Boolean) : [];
-    const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && (r.effect || r.category)).map((r) => ({
-      id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
-      keyword: String(r.keyword).trim(),
-      category: String(r.category || r.effect),
-      enabled: r.enabled !== false,
-    })) : [];
+    const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && (r.effectIds || r.effects || r.effect || r.category)).map((r) => ({
+       id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
+       keyword: String(r.keyword).trim(),
+       effectIds: (Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]).map(String),
+       enabled: r.enabled !== false,
+     })) : [];
     return { parsed, importedEffects, importedCats, importedTags, importedRules };
   }
 
@@ -608,7 +601,6 @@
     });
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
-      if (!getEffect(cat.id)) effects.push(normalizeEffect({ id: cat.id, label: cat.label, color: cat.color, mode: cat.effect, hint: cat.hint }));
     });
     importedTags.forEach((tag) => {
       if (!getTag(tag.id)) tags.push(tag);
@@ -617,21 +609,18 @@
       if (!keywordRules.some((r) => r.keyword.toLowerCase() === rule.keyword.toLowerCase())) keywordRules.push(rule);
     });
     for (const item of parsed) {
-      if (!getEffect(item.level)) {
-        effects.push({ id: item.level, label: item.level, color: '#0969da', mode: 'normal', hint: '' });
-      }
       (item.tags || []).forEach((id) => {
         if (!getTag(id)) tags.push({ id, label: id, color: '#8250df' });
       });
       const prev = marks[item.username];
       if (!prev) {
-        marks[item.username] = { level: item.level, effect: item.effect || item.level, note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { level: item.level, effects: [item.effect || item.level], note: item.note, tags: item.tags || [], at: item.at };
         added++;
         continue;
       }
       if (mode === 'skip') { skipped++; continue; }
       if (mode === 'replace') {
-        marks[item.username] = { level: item.level, effect: item.effect || item.level, note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { level: item.level, effects: [item.effect || item.level], note: item.note, tags: item.tags || [], at: item.at };
         updated++;
         continue;
       }
@@ -639,7 +628,7 @@
         ? (prev.note ? `${prev.note} | ${item.note}` : item.note)
         : prev.note;
       const mergedTags = [...new Set([...(prev.tags || []), ...(item.tags || [])])];
-      marks[item.username] = { level: item.level, effect: item.effect || prev.effect || item.level, note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
+      marks[item.username] = { level: item.level, effects: [...new Set([...(prev.effects || [prev.effect]), item.effect || item.level].filter(Boolean))], note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
       updated++;
     }
     saveCats();
@@ -696,6 +685,7 @@
     panelEl.classList.add('is-open');
     fillCatSelects();
     renderEffects();
+    renderBuiltinRules();
     renderCats();
     renderTags();
     renderPanelList();
@@ -722,8 +712,10 @@
       </div>
       <div class="ld-tle-panel__nav" role="tablist">
         <button type="button" class="is-active" data-pane="users">用户 <span class="ld-tle-panel__count"></span></button>
-      <button type="button" data-pane="labels">效果库</button>
-        <button type="button" data-pane="keywords">关键词</button>
+        <button type="button" data-pane="builtin">内置规则</button>
+        <button type="button" data-pane="groups">分组</button>
+        <button type="button" data-pane="effects">效果库</button>
+        <button type="button" data-pane="keywords">关键词匹配</button>
         <button type="button" data-pane="data">数据</button>
       </div>
       <section class="ld-tle-panel__pane is-active" data-pane="users">
@@ -743,20 +735,16 @@
         </div>
         <div class="ld-tle-panel__list"></div>
       </section>
-      <section class="ld-tle-panel__pane" data-pane="labels">
-        <div class="ld-tle-panel__section-head"><div><strong>效果库</strong><span>独立管理，可被分组和关键词重复使用</span></div></div>
-        <div class="ld-tle-panel__effects"></div>
-      <div class="ld-tle-panel__effect-add ld-tle-panel__card">
-        <input type="text" class="ld-tle-panel__effect-label" placeholder="新效果名">
-        <input type="color" class="ld-tle-panel__effect-color" value="#0969da" title="颜色">
-        <select class="ld-tle-panel__effect-kind"><option value="color">颜色</option><option value="fade">淡化</option><option value="strike">删除线</option><option value="badge">提示标记</option></select>
-        <button type="button" data-act="add-effect">添加效果</button>
-        </div>
-        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，不拥有独立样式</span></div></div>
+      <section class="ld-tle-panel__pane" data-pane="builtin">
+        <div class="ld-tle-panel__section-head"><div><strong>内置规则</strong><span>脚本根据话题状态自动应用，开关仅控制是否启用</span></div></div>
+        <div class="ld-tle-panel__builtin"></div>
+      </section>
+      <section class="ld-tle-panel__pane" data-pane="groups">
+        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，可叠加多个效果</span></div></div>
         <div class="ld-tle-panel__cats"></div>
         <div class="ld-tle-panel__cat-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__cat-label" placeholder="新分组名">
-          <select class="ld-tle-panel__cat-effect"></select>
+          <select class="ld-tle-panel__cat-effect" multiple></select>
           <button type="button" data-act="add-cat">添加分组</button>
         </div>
         <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>只显示在用户名旁，可多选</span></div></div>
@@ -767,12 +755,16 @@
           <button type="button" data-act="add-tag">添加</button>
         </div>
       </section>
+      <section class="ld-tle-panel__pane" data-pane="effects">
+        <div class="ld-tle-panel__section-head"><div><strong>效果库</strong><span>独立管理，可被分组和关键词重复使用</span></div></div>
+        <div class="ld-tle-panel__effects"></div>
+      </section>
       <section class="ld-tle-panel__pane" data-pane="keywords">
         <div class="ld-tle-panel__section-head"><div><strong>关键词规则</strong><span>命中话题标题或主题标签后应用指定效果</span></div></div>
         <div class="ld-tle-panel__keywords"></div>
         <div class="ld-tle-panel__keyword-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__keyword" placeholder="关键词，例如：抽奖">
-          <select class="ld-tle-panel__keyword-cat"></select>
+          <select class="ld-tle-panel__keyword-cat" multiple></select>
           <button type="button" data-act="add-keyword">添加规则</button>
         </div>
       </section>
@@ -821,8 +813,8 @@
     });
     panelEl.querySelector('[data-act="add-cat"]').addEventListener('click', () => {
       const label = (panelEl.querySelector('.ld-tle-panel__cat-label').value || '').trim();
-      const effectId = panelEl.querySelector('.ld-tle-panel__cat-effect').value;
-      const cat = addCategory(label, effectId);
+       const effectIds = [...panelEl.querySelector('.ld-tle-panel__cat-effect').selectedOptions].map((option) => option.value);
+       const cat = addCategory(label, effectIds);
       if (!cat) { showPanelMsg('效果名无效或已存在'); return; }
       panelEl.querySelector('.ld-tle-panel__cat-label').value = '';
       showPanelMsg(`已添加分类「${cat.label}」`);
@@ -835,25 +827,16 @@
       panelEl.querySelector('.ld-tle-panel__tag-label').value = '';
       showPanelMsg(`已添加标签「${tag.label}」`);
     });
-    panelEl.querySelector('[data-act="add-effect"]').addEventListener('click', () => {
-      const label = panelEl.querySelector('.ld-tle-panel__effect-label').value.trim();
-      const color = panelEl.querySelector('.ld-tle-panel__effect-color').value;
-      const kind = panelEl.querySelector('.ld-tle-panel__effect-kind').value;
-      const effect = addEffect(label, color, kind);
-      if (!effect) { showPanelMsg('效果名无效或已存在'); return; }
-      panelEl.querySelector('.ld-tle-panel__effect-label').value = '';
-      showPanelMsg(`已添加效果「${effect.label}」`);
-    });
     panelEl.querySelector('[data-act="add-keyword"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__keyword');
       const keyword = input.value.trim();
-      const effect = panelEl.querySelector('.ld-tle-panel__keyword-cat').value;
-      if (!keyword || !effect) { showPanelMsg('请输入关键词并选择效果'); return; }
+       const effectIds = [...panelEl.querySelector('.ld-tle-panel__keyword-cat').selectedOptions].map((option) => option.value);
+       if (!keyword || !effectIds.length) { showPanelMsg('请输入关键词并选择效果'); return; }
       if (keywordRules.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase())) {
         showPanelMsg('关键词已存在');
         return;
       }
-      keywordRules.push({ id: `rule-${Date.now()}`, keyword, category: effect, effect, enabled: true });
+       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, enabled: true });
       saveKeywordRules();
       input.value = '';
       renderKeywords();
@@ -861,12 +844,34 @@
       showPanelMsg(`已添加关键词「${keyword}」`);
     });
     document.body.append(panelEl);
-    fillCatSelects();
+     fillCatSelects();
+     renderBuiltinRules();
     fillEffectSelects();
     renderCats();
     renderEffects();
     renderTags();
     renderKeywords();
+  }
+
+  function renderBuiltinRules() {
+    if (!panelEl) return;
+    const box = panelEl.querySelector('.ld-tle-panel__builtin');
+    if (!box) return;
+    box.innerHTML = '';
+    DEFAULT_EFFECTS.forEach((effect) => {
+      const row = document.createElement('label');
+      row.className = 'ld-tle-panel__builtin-row';
+      const enabled = document.createElement('input');
+      enabled.type = 'checkbox';
+      enabled.checked = getEffect(effect.id)?.enabled !== false;
+      enabled.addEventListener('change', () => toggleEffect(effect.id, enabled.checked));
+      const name = document.createElement('span');
+      name.textContent = effect.label;
+      const hint = document.createElement('small');
+      hint.textContent = effect.hint;
+      row.append(enabled, name, hint);
+      box.append(row);
+    });
   }
 
   function slugify(label) {
@@ -877,32 +882,18 @@
     return 'cat-' + (h >>> 0).toString(36);
   }
 
-  function addEffect(label, color, kind) {
-    const name = String(label || '').trim();
-    if (!name || effects.some((e) => e.label === name)) return null;
-    const id = uniqueId(name, (value) => !!getEffect(value));
-    const effect = normalizeEffect({ id, label: name, color, kind, mode: kind === 'fade' ? 'dim' : 'normal' });
-    if (!effect) return null;
-    effects.push(effect);
-    saveEffects();
-    updateMarkStyles();
-    fillEffectSelects();
-    renderEffects();
-    return effect;
-  }
-
   function updateGroup(id, patch) {
     const group = cats.find((cat) => cat.id === id);
     if (!group) return;
     if (patch.label != null && String(patch.label).trim()) group.label = String(patch.label).trim();
-    if (patch.effectId && getEffect(patch.effectId)) group.effectId = patch.effectId;
+    if (patch.effectIds) group.effectIds = patch.effectIds.filter((effectId) => getEffect(effectId));
     saveCats();
     fillCatSelects();
     renderCats();
     applyMarks();
   }
 
-  function addCategory(label, effectId) {
+  function addCategory(label, effectIds) {
     const name = String(label || '').trim();
     if (!name) return null;
     if (cats.some((c) => c.label === name)) return null;
@@ -912,8 +903,8 @@
       while (getCat(id + '-' + n)) n++;
       id = id + '-' + n;
     }
-    const effect = getEffect(effectId) || effects[0];
-    const cat = normalizeCat({ id, label: name, color: effect.color, effect: effect.mode, effectId: effect.id });
+    const ids = (Array.isArray(effectIds) ? effectIds : [effectIds]).filter((effectId) => getEffect(effectId));
+    const cat = normalizeCat({ id, label: name, effectIds: ids.length ? ids : [effects[0].id] });
     if (!cat) return null;
     cats.push(cat);
     saveCats();
@@ -924,62 +915,10 @@
     return cat;
   }
 
-  function updateCategory(id, patch) {
-    const cat = getCat(id);
-    if (!cat) return;
-    if (patch.label != null) {
-      const label = String(patch.label).trim();
-      if (label) cat.label = label;
-    }
-    if (patch.color) cat.color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color) ? patch.color : cat.color;
-    if (patch.effect && ['normal', 'tint', 'dim'].includes(patch.effect)) cat.effect = patch.effect;
-    const effect = getEffect(id);
-    if (effect) {
-      effect.label = cat.label;
-      effect.color = cat.color;
-      effect.mode = cat.effect;
-    }
-    saveCats();
-    saveEffects();
-    updateMarkStyles();
-    fillCatSelects();
-    renderCats();
-    applyMarks();
-    if (panelEl && panelEl.classList.contains('is-open')) renderPanelList();
-  }
-
   function removeCategory(id) {
     cats = cats.filter((group) => group.id !== id);
     saveCats();
     renderCats();
-  }
-
-  function removeEffect(id) {
-    const effect = getEffect(id);
-    if (!effect || effect.builtin || effects.length <= 1) return;
-    const fallback = effects.find((item) => item.id !== id);
-    effects = effects.filter((item) => item.id !== id);
-    cats.forEach((group) => {
-      if (group.effectId === id) group.effectId = fallback.id;
-    });
-    Object.values(marks).forEach((mark) => {
-      if (mark.effect === id) mark.effect = fallback.id;
-    });
-    keywordRules.forEach((rule) => {
-      if (rule.effect === id || rule.category === id) {
-        rule.effect = fallback.id;
-        rule.category = fallback.id;
-      }
-    });
-    saveEffects();
-    saveCats();
-    saveMarks();
-    saveKeywordRules();
-    updateMarkStyles();
-    fillCatSelects();
-    renderEffects();
-    renderCats();
-    applyMarks();
   }
 
   function fillCatSelects() {
@@ -993,12 +932,17 @@
     addSel.innerHTML = '';
     if (keywordSel) keywordSel.innerHTML = '';
     if (groupSel) groupSel.innerHTML = '';
-    effects.forEach((c) => {
+    cats.forEach((c) => {
       const a = document.createElement('option');
       a.value = c.id;
       a.textContent = c.label;
       filter.append(a.cloneNode(true));
       addSel.append(a);
+    });
+    effects.forEach((c) => {
+      const a = document.createElement('option');
+      a.value = c.id;
+      a.textContent = c.label;
       if (keywordSel) keywordSel.append(a.cloneNode(true));
       if (groupSel) groupSel.append(a.cloneNode(true));
     });
@@ -1014,44 +958,19 @@
     const box = panelEl.querySelector('.ld-tle-panel__effects');
     if (!box) return;
     box.innerHTML = '';
-    effects.forEach((effect) => {
+    effects.filter((effect) => isBuiltinEffect(effect.id)).forEach((effect) => {
       const row = document.createElement('div');
       row.className = 'ld-tle-panel__effect-row';
-      const swatch = document.createElement('input');
-      swatch.type = 'color';
-      swatch.value = effect.color;
-      const label = document.createElement('input');
-      label.type = 'text';
-      label.value = effect.label;
-      const kind = document.createElement('select');
-      kind.innerHTML = '<option value="color">颜色</option><option value="fade">淡化</option><option value="strike">删除线</option><option value="badge">提示标记</option><option value="none">无</option>';
-      kind.value = effect.kind;
-      const priority = document.createElement('input');
-      priority.type = 'number';
-      priority.min = '0';
-      priority.max = '9999';
-      priority.value = effect.priority || 0;
-      const enabled = document.createElement('input');
-      enabled.type = 'checkbox';
-      enabled.checked = effect.enabled !== false;
-      enabled.title = '启用效果';
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.textContent = '删';
-      const builtin = isBuiltinEffect(effect.id);
-      swatch.disabled = builtin;
-      label.disabled = builtin;
-      kind.disabled = builtin;
-      priority.disabled = builtin;
-      del.disabled = builtin;
-      if (builtin) row.title = '内置效果不可编辑';
-      swatch.addEventListener('change', () => updateEffect(effect.id, { color: swatch.value }));
-      label.addEventListener('change', () => updateEffect(effect.id, { label: label.value }));
-      kind.addEventListener('change', () => updateEffect(effect.id, { kind: kind.value }));
-      priority.addEventListener('change', () => updateEffect(effect.id, { priority: priority.value }));
-      enabled.addEventListener('change', () => toggleEffect(effect.id, enabled.checked));
-      del.addEventListener('click', () => removeEffect(effect.id));
-      row.append(swatch, label, kind, priority, enabled, del);
+      const swatch = document.createElement('span');
+      swatch.className = 'ld-tle-panel__effect-swatch';
+      swatch.style.background = effect.color;
+      const label = document.createElement('strong');
+      label.textContent = effect.label;
+      const kind = document.createElement('span');
+      kind.textContent = effect.kind === 'color' ? '颜色' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'badge' ? '提示标记' : '无';
+      const hint = document.createElement('small');
+      hint.textContent = effect.hint;
+      row.append(swatch, label, kind, hint);
       box.append(row);
     });
   }
@@ -1063,6 +982,7 @@
     saveEffects();
     updateMarkStyles();
     applyMarks();
+    renderBuiltinRules();
   }
 
   function renderKeywords() {
@@ -1080,12 +1000,14 @@
       const word = document.createElement('input');
       word.type = 'text';
       word.value = rule.keyword;
-      const select = document.createElement('select');
-      effects.forEach((cat) => {
+       const select = document.createElement('select');
+       select.multiple = true;
+       select.size = Math.min(4, Math.max(2, effects.length));
+       effects.forEach((cat) => {
         const option = document.createElement('option');
         option.value = cat.id;
         option.textContent = cat.label;
-        option.selected = cat.id === (rule.effect || rule.category);
+         option.selected = (rule.effectIds || []).includes(cat.id);
         select.append(option);
       });
       const enabled = document.createElement('input');
@@ -1117,12 +1039,12 @@
           word.value = rule.keyword;
         }
       });
-      select.addEventListener('change', () => { rule.category = select.value; rule.effect = select.value; saveKeywordRules(); applyMarks(); });
+       select.addEventListener('change', () => { rule.effectIds = [...select.selectedOptions].map((option) => option.value); saveKeywordRules(); applyMarks(); });
       enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
       up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
       down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
       del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
-      row.append(word, select, enabled, up, down, del);
+       row.append(word, select, enabled, up, down, del);
       box.append(row);
     });
   }
@@ -1180,7 +1102,7 @@
     if (!panelEl) return;
     const box = panelEl.querySelector('.ld-tle-panel__tags');
     if (!box) return;
-    box.innerHTML = '';
+     box.innerHTML = '';
     if (!tags.length) {
       box.innerHTML = '<div class="ld-tle-panel__empty">暂无子标签</div>';
       return;
@@ -1215,49 +1137,25 @@
       const label = document.createElement('input');
       label.type = 'text';
       label.value = c.label;
-      const effect = document.createElement('select');
+       const effect = document.createElement('select');
+       effect.multiple = true;
+       effect.size = Math.min(4, Math.max(2, effects.length));
       effects.forEach((item) => {
         const option = document.createElement('option');
         option.value = item.id;
         option.textContent = item.label;
-      option.selected = item.id === c.effectId;
+         option.selected = (c.effectIds || []).includes(item.id);
         effect.append(option);
       });
       const del = document.createElement('button');
       del.type = 'button';
       del.textContent = '删';
       label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
-      effect.addEventListener('change', () => updateGroup(c.id, { effectId: effect.value }));
+       effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.selectedOptions].map((option) => option.value) }));
       del.addEventListener('click', () => removeCategory(c.id));
-      row.append(label, effect, del);
+       row.append(label, effect, del);
       box.append(row);
     });
-  }
-
-  function updateEffect(id, patch) {
-    const effect = getEffect(id);
-    if (!effect || effect.builtin) return;
-    if (patch.label != null && String(patch.label).trim()) effect.label = String(patch.label).trim();
-    if (patch.color && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color)) effect.color = patch.color;
-    if (patch.mode && ['normal', 'tint', 'dim'].includes(patch.mode)) effect.mode = patch.mode;
-    if (patch.kind && ['none', 'color', 'fade', 'strike', 'badge'].includes(patch.kind)) {
-      effect.kind = patch.kind;
-      effect.mode = patch.kind === 'fade' ? 'dim' : 'normal';
-    }
-    if (patch.priority != null) effect.priority = Math.max(0, Number(patch.priority) || 0);
-    const cat = getCat(id);
-      if (cat) {
-        cat.label = effect.label;
-        cat.color = effect.color;
-        cat.effect = effect.mode;
-        cat.effectId = effect.id;
-    }
-    saveEffects();
-    saveCats();
-    updateMarkStyles();
-    fillCatSelects();
-    renderCats();
-    applyMarks();
   }
 
   function runImport(mode) {
@@ -1288,7 +1186,7 @@
     panelEl.querySelector('.ld-tle-panel__stat-tags').textContent = tags.length;
     const entries = Object.entries(marks)
       .filter(([user, info]) => {
-        if (filter && (info.effect || info.level) !== filter) return false;
+         if (filter && !(info.effects || [info.effect || info.level]).includes(filter)) return false;
         if (!q) return true;
         return user.includes(q) || (info.note || '').toLowerCase().includes(q);
       })
@@ -1309,14 +1207,16 @@
         <input type="text" placeholder="备注" value="">
         <button type="button" data-act="del">删</button>
       `;
-      const sel = row.querySelector('select');
-      effects.forEach((m) => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.label;
-        if (m.id === (info.effect || info.level)) opt.selected = true;
-        sel.append(opt);
-      });
+       const sel = row.querySelector('select');
+       sel.multiple = true;
+       sel.size = Math.min(4, Math.max(2, effects.length));
+       cats.forEach((m) => {
+         const opt = document.createElement('option');
+         opt.value = m.id;
+         opt.textContent = m.label;
+         if ((info.groupId === m.id) || (info.effects || [info.effect || info.level]).some((id) => (m.effectIds || []).includes(id))) opt.selected = true;
+         sel.append(opt);
+       });
       const note = row.querySelector('input');
       note.value = info.note || '';
       const tagBox = row.querySelector('.ld-tle-panel__row-tags');
@@ -1329,13 +1229,13 @@
         tagButton.addEventListener('click', () => {
           tagButton.classList.toggle('is-on');
           const selectedTags = [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag);
-          setMark(user, sel.value, note.value, { tags: selectedTags, keepPanel: true });
+           setMark(user, sel.selectedOptions[0]?.value, note.value, { effects: [...sel.selectedOptions].map((option) => option.value), tags: selectedTags, keepPanel: true });
         });
         tagButton.dataset.tag = tag.id;
         tagBox.append(tagButton);
       });
-      sel.addEventListener('change', () => setMark(user, sel.value, note.value, { effect: sel.value, tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
-      note.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+       sel.addEventListener('change', () => setMark(user, sel.selectedOptions[0]?.value, note.value, { effects: [...sel.selectedOptions].map((option) => option.value), tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+       note.addEventListener('change', () => setMark(user, sel.selectedOptions[0]?.value, note.value, { effects: [...sel.selectedOptions].map((option) => option.value), tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
       row.querySelector('[data-act="del"]').addEventListener('click', () => {
         setMark(user, null);
         renderPanelList();
@@ -1920,9 +1820,14 @@
       .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label, .ld-tle-panel__tag-add .ld-tle-panel__tag-label { flex: 1 1 140px; padding: 7px 10px; }
       .ld-tle-panel__sec { padding: 9px 10px 7px; margin: 14px 0 8px; border-bottom: 1px solid #eaeef2; color: #24292f; font-size: 12px; font-weight: 700; }
       .ld-tle-panel__cats, .ld-tle-panel__tags { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
-      .ld-tle-panel__effects { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
-      .ld-tle-panel__effect-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px 64px 28px 28px 38px; gap: 7px; align-items: center; padding: 5px 0; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__effects, .ld-tle-panel__builtin { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
+      .ld-tle-panel__effect-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px minmax(0, 1.5fr); gap: 7px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__effect-row:last-child { border-bottom: 0; }
+      .ld-tle-panel__effect-swatch { width: 24px; height: 24px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+      .ld-tle-panel__effect-row small, .ld-tle-panel__builtin-row small { color: #8b949e; }
+      .ld-tle-panel__builtin-row { display: grid; grid-template-columns: 28px minmax(100px, 1fr) minmax(100px, 1.5fr); gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__builtin-row:last-child { border-bottom: 0; }
+      .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 76px; }
       .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) 180px 38px; gap: 7px; align-items: center; padding: 5px 0; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
       .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
@@ -2008,7 +1913,7 @@
         .ld-tle-panel__nav button { color: #8b949e; }
         .ld-tle-panel__nav button.is-active { color: #58a6ff; border-color: #58a6ff; }
         .ld-tle-panel__card { border-color: #30363d; background: #0d1117; }
-        .ld-tle-panel__stat, .ld-tle-panel__cats, .ld-tle-panel__tags { border-color: #30363d; background: #0d1117; }
+         .ld-tle-panel__stat, .ld-tle-panel__cats, .ld-tle-panel__tags, .ld-tle-panel__effects, .ld-tle-panel__builtin { border-color: #30363d; background: #0d1117; }
         .ld-tle-panel__stat strong { color: #f0f6fc; }
         .ld-tle-panel__section-head span, .ld-tle-panel__subtitle { color: #8b949e; }
         .ld-tle-panel__list { border-color: #30363d; }
