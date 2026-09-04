@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.28.0
+// @version      0.29.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -37,13 +37,14 @@
   const MARK_ROW = 'ld-tle-mark-row';
   const DEFAULT_CATS = [
     { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], color: '#6e7681', hint: '弱化显示' },
-    { id: 'caution', label: '注意', effectIds: ['color-mark'], color: '#d4a72c', hint: '黄色警示' },
-    { id: 'watch', label: '关注', effectIds: ['color-mark'], color: '#0969da', hint: '蓝色高亮' },
-    { id: 'friend', label: '友好', effectIds: ['color-mark'], color: '#1a7f37', hint: '绿色高亮' },
-    { id: 'vip', label: '重要', effectIds: ['color-mark'], color: '#d4a72c', hint: '金色强调' },
+    { id: 'caution', label: '注意', effectIds: ['left-highlight'], color: '#d4a72c', hint: '黄色警示' },
+    { id: 'watch', label: '关注', effectIds: ['left-highlight'], color: '#0969da', hint: '蓝色高亮' },
+    { id: 'friend', label: '友好', effectIds: ['left-highlight'], color: '#1a7f37', hint: '绿色高亮' },
+    { id: 'vip', label: '重要', effectIds: ['left-highlight'], color: '#d4a72c', hint: '金色强调' },
   ];
   const DEFAULT_EFFECTS = [
-    { id: 'color-mark', label: '颜色标记', color: '#0969da', mode: 'normal', kind: 'color', priority: 30, hint: '为标记添加自定义颜色' },
+    { id: 'left-highlight', label: '左侧高亮', color: '#0969da', mode: 'normal', kind: 'color', priority: 30, hint: '为话题增加左侧颜色线' },
+    { id: 'tag-highlight', label: '关键词/tag 高亮', color: '#0969da', mode: 'normal', kind: 'tag', priority: 30, hint: '高亮匹配话题中的标签' },
     { id: 'normal', label: '无额外效果', color: '#6e7681', mode: 'normal', kind: 'none', priority: 0, hint: '只显示标记' },
     { id: 'lv1', label: 'Lv1颜色', color: '#0969da', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv1 左侧颜色线' },
     { id: 'lv2', label: 'Lv2颜色', color: '#1a7f37', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv2 左侧颜色线' },
@@ -65,14 +66,14 @@
     'lottery-dim': 'fade-light',
     'stale-dim': 'fade-light',
   };
-  const EFFECT_LIBRARY_IDS = new Set(['color-mark', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic', 'lonely']);
+  const EFFECT_LIBRARY_IDS = new Set(['left-highlight', 'tag-highlight', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic', 'lonely']);
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
 
   function libraryEffectIds(ids) {
     return [...new Set((Array.isArray(ids) ? ids : [ids]).map(String).map((id) => {
-      if (['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id)) return 'color-mark';
+      if (['color-mark', 'lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id)) return 'left-highlight';
       return LEGACY_EFFECT_ID_MAP[id] || id;
     }).filter((id) => EFFECT_LIBRARY_IDS.has(id)))];
   }
@@ -89,7 +90,7 @@
 
   cats.forEach((group) => {
     group.effectIds = libraryEffectIds(group.effectIds || [group.effectId]).filter((id) => getEffect(id));
-    if (!group.effectIds.length) group.effectIds = ['color-mark'];
+    if (!group.effectIds.length) group.effectIds = ['left-highlight'];
   });
 
   function normalizeCat(raw) {
@@ -130,7 +131,7 @@
     if (!id || !label) return null;
     return {
       id, label, color, mode,
-      kind: ['none', 'color', 'fade', 'strike', 'mosaic', 'badge'].includes(raw.kind) ? raw.kind : 'color',
+      kind: ['none', 'color', 'tag', 'fade', 'strike', 'mosaic', 'badge'].includes(raw.kind) ? raw.kind : 'color',
       priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0,
       opacity: Number.isFinite(Number(raw.opacity)) ? Math.max(0.1, Math.min(1, Number(raw.opacity))) : undefined,
       hint: String(raw.hint || '').trim(),
@@ -178,7 +179,7 @@
     const ids = Array.isArray(value) ? value : [value];
     return ids.flatMap((id) => {
       const direct = getEffect(id);
-      if (direct) return [colorOverride && direct.kind === 'color' ? { ...direct, color: colorOverride } : direct];
+      if (direct) return [colorOverride && (direct.kind === 'color' || direct.kind === 'tag') ? { ...direct, color: colorOverride } : direct];
       const cat = getCat(id);
       return cat ? boundEffects(cat.effectIds, cat.color || colorOverride) : [];
     }).filter((effect) => effect && effect.enabled !== false);
@@ -404,9 +405,14 @@
   function applyTopicEffects(row, effectsToApply) {
     markClassList(row);
     row.style.removeProperty('--ld-tle-effect-color');
+    row.style.removeProperty('--ld-tle-tag-color');
     const seen = new Set();
     effectsToApply.filter((effect) => effect && effect.enabled !== false).sort((a, b) => (b.priority || 0) - (a.priority || 0)).forEach((effect) => {
       if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) row.style.setProperty('--ld-tle-effect-color', effect.color);
+      if (effect.kind === 'tag') {
+        row.classList.add(`${EFFECT_CLASS}--tag-highlight`);
+        if (!row.style.getPropertyValue('--ld-tle-tag-color')) row.style.setProperty('--ld-tle-tag-color', effect.color);
+      }
       if (!seen.has(effect.id)) {
         seen.add(effect.id);
         row.classList.add(`${EFFECT_CLASS}--${effect.id}`);
@@ -1009,7 +1015,7 @@
       const label = document.createElement('strong');
       label.textContent = effect.label;
       const kind = document.createElement('span');
-       kind.textContent = effect.kind === 'color' ? '颜色' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
+       kind.textContent = effect.kind === 'color' ? '左侧高亮' : effect.kind === 'tag' ? '关键词/tag 高亮' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
       const hint = document.createElement('small');
       hint.textContent = effect.hint;
       row.append(swatch, label, kind, hint);
@@ -2029,6 +2035,8 @@
         tr.${EFFECT_CLASS}--${effect.id} td:first-child,
         tr.${EFFECT_CLASS}--${effect.id} td.main-link { ${colorLine} }
          tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link { ${strike} ${mosaic} }
+         tr.${EFFECT_CLASS}--tag-highlight .discourse-tag,
+         tr.${EFFECT_CLASS}--tag-highlight .badge-category { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
         tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
         }
