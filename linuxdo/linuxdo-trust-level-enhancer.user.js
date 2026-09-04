@@ -55,7 +55,7 @@
     { id: 'fade2', label: '淡化等级 2 / 删除线', color: '#6e7681', mode: 'normal', kind: 'strike', priority: 20, hint: '增加删除线效果' },
     { id: 'promo-dim', label: '推广淡化', color: '#9aa4af', mode: 'dim', kind: 'fade', priority: 20, hint: '原推广淡化效果' },
     { id: 'lottery-dim', label: '抽奖淡化', color: '#8250df', mode: 'dim', kind: 'fade', priority: 20, hint: '原抽奖淡化效果' },
-    { id: 'stale-dim', label: '过期淡化', color: '#6e7681', mode: 'dim', kind: 'fade', priority: 10, hint: '原过期淡化效果' },
+    { id: 'stale-dim', label: '过期淡化', color: '#6e7681', mode: 'dim', kind: 'fade', opacity: 0.58, priority: 10, hint: '降低过期主题存在感，但保持可读' },
     { id: 'lonely', label: '待回复', color: '#9a6700', mode: 'normal', kind: 'badge', priority: 20, hint: '标记待回复主题' },
   ].map((effect) => ({ ...effect, builtin: true, enabled: true }));
   const BUILTIN_EFFECT_IDS = new Set(DEFAULT_EFFECTS.map((effect) => effect.id));
@@ -127,6 +127,7 @@
       id, label, color, mode,
       kind: ['none', 'color', 'fade', 'strike', 'badge'].includes(raw.kind) ? raw.kind : 'color',
       priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0,
+      opacity: Number.isFinite(Number(raw.opacity)) ? Math.max(0.1, Math.min(1, Number(raw.opacity))) : undefined,
       hint: String(raw.hint || '').trim(),
       builtin: !!raw.builtin,
       enabled: raw.enabled !== false,
@@ -1997,12 +1998,13 @@
       const [r, g, b] = hexToRgb(effect.color);
       const fg = contrastColor(effect.color);
       const dim = effect.kind === 'fade' || effect.mode === 'dim';
+      const opacity = effect.opacity || 0.28;
       const tint = effect.kind === 'color' && effect.mode === 'tint';
       const colorLine = effect.kind === 'color' ? `box-shadow: inset 3px 0 0 ${effect.color} !important;` : '';
       const strike = effect.kind === 'strike' ? 'text-decoration: line-through !important; text-decoration-color: currentColor !important;' : '';
       return `
         tr.${EFFECT_CLASS}--${effect.id} td {
-          ${dim ? 'opacity: .28 !important; filter: grayscale(1) !important;' : ''}
+          ${dim ? `opacity: ${opacity} !important; filter: grayscale(.75) !important;` : ''}
           ${tint ? `background: rgba(${r},${g},${b},.14) !important;` : ''}
           ${strike}
         }
@@ -2012,7 +2014,7 @@
         tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
         }
-        tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? 'opacity: .75 !important; filter: grayscale(.4) !important;' : ''} }
+        tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? `opacity: ${Math.min(1, opacity + 0.25)} !important; filter: grayscale(.35) !important;` : ''} }
         .${MARK_BADGE}--effect-${effect.id} { color: ${fg}; background: ${effect.color}; }
       `;
     }).concat(tags.map((t) => {
