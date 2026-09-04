@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.36.0
+// @version      0.40.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -36,11 +36,11 @@
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
   const DEFAULT_CATS = [
-    { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], color: '#6e7681', hint: '弱化显示' },
-    { id: 'caution', label: '注意', effectIds: ['left-highlight'], color: '#d4a72c', hint: '黄色警示' },
-    { id: 'watch', label: '关注', effectIds: ['left-highlight'], color: '#0969da', hint: '蓝色高亮' },
-    { id: 'friend', label: '友好', effectIds: ['left-highlight'], color: '#1a7f37', hint: '绿色高亮' },
-    { id: 'vip', label: '重要', effectIds: ['left-highlight'], color: '#d4a72c', hint: '金色强调' },
+    { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], color: '#6e7681', priority: 10000, hint: '弱化显示' },
+    { id: 'caution', label: '注意', effectIds: ['left-highlight'], color: '#d4a72c', priority: 10000, hint: '黄色警示' },
+    { id: 'watch', label: '关注', effectIds: ['left-highlight'], color: '#0969da', priority: 10000, hint: '蓝色高亮' },
+    { id: 'friend', label: '友好', effectIds: ['left-highlight'], color: '#1a7f37', priority: 10000, hint: '绿色高亮' },
+    { id: 'vip', label: '重要', effectIds: ['left-highlight'], color: '#d4a72c', priority: 10000, hint: '金色强调' },
   ];
   const DEFAULT_EFFECTS = [
     { id: 'left-highlight', label: '左侧高亮', color: '#0969da', mode: 'normal', kind: 'color', priority: 30, hint: '为话题增加左侧颜色线' },
@@ -101,7 +101,8 @@
     if (!id || !label) return null;
     const effectIds = libraryEffectIds(Array.isArray(raw.effectIds) ? raw.effectIds : [raw.effectId || raw.id]);
     const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '';
-    return { id, label, effectIds: effectIds.map(String), color, hint };
+    const priority = Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 10000;
+    return { id, label, effectIds: effectIds.map(String), color, priority, hint };
   }
 
   function loadCats() {
@@ -146,7 +147,11 @@
       const saved = Array.isArray(raw) ? raw.map(normalizeEffect).filter(Boolean) : [];
       const byId = new Map(DEFAULT_EFFECTS.map((effect) => [effect.id, { ...effect }]));
       saved.forEach((effect) => {
-        if (isBuiltinEffect(effect.id)) byId.get(effect.id).enabled = effect.enabled !== false;
+        if (isBuiltinEffect(effect.id)) {
+          const builtin = byId.get(effect.id);
+          builtin.enabled = effect.enabled !== false;
+          if (Number.isFinite(Number(effect.priority))) builtin.priority = Number(effect.priority);
+        }
       });
       return [...byId.values()];
     } catch (e) {
@@ -362,8 +367,11 @@
       const mark = getMark(user);
       const keywordMatch = keywordCategory(row);
       const candidates = [];
-      if (mark) boundEffects(mark.effects || mark.effect || mark.level).forEach((effect) => candidates.push({ ...effect, priority: 10000 }));
-      if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: 5000 }));
+      if (mark) {
+        const group = getCat(mark.level);
+        boundEffects(mark.effects || mark.effect || mark.level).forEach((effect) => candidates.push({ ...effect, priority: group?.priority ?? 10000 }));
+      }
+      if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: keywordMatch.rule.priority ?? 5000 }));
       reusableEffectForRow(row).forEach((effect) => {
         if (effect) candidates.push({ ...effect, priority: effect.priority || 0 });
       });
@@ -394,16 +402,21 @@
     if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
     if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
     if (row.classList.contains(STALE_CLASS)) result.push(getEffect('fade-light'));
-    if (row.classList.contains(LONELY_CLASS)) result.push(getEffect('lonely'));
+    if (row.classList.contains(LONELY_CLASS)) {
+      const lonely = getEffect('lonely');
+      if (lonely) result.push({ ...lonely, priority: lonely.priority });
+    }
       if (row.querySelector('.' + WELFARE_BADGE_CLASS)) {
         const welfare = getEffect('welfare');
         const tagHighlight = getEffect('tag-highlight');
-        if (welfare?.enabled !== false && tagHighlight) result.push({ ...tagHighlight, color: welfare.color, welfareOnly: true });
+      if (welfare?.enabled !== false && tagHighlight) result.push({ ...tagHighlight, color: welfare.color, priority: welfare.priority, welfareOnly: true });
     }
     const categoryText = row.querySelector('.badge-category__name')?.textContent || '';
     if (/富可敌国/.test(categoryText)) {
       const rich = getEffect('rich');
-      if (rich?.enabled !== false) result.push(getEffect('fade-deep'), getEffect('strike'));
+      if (rich?.enabled !== false) {
+        result.push({ ...getEffect('fade-deep'), priority: rich.priority }, { ...getEffect('strike'), priority: rich.priority });
+      }
     }
     const levelClass = [...row.querySelectorAll('td.main-link')].flatMap((td) => [...td.classList]).find((name) => /^ld-tle-row--[1-4]$/.test(name));
     if (levelClass) result.push(getEffect(levelClass.replace('ld-tle-row--', 'lv')));
@@ -417,7 +430,12 @@
     row.style.removeProperty('--ld-tle-tag-color');
     row.classList.remove('ld-tle-welfare-only');
     const seen = new Set();
-    effectsToApply.filter((effect) => effect && effect.enabled !== false).sort((a, b) => (b.priority || 0) - (a.priority || 0)).forEach((effect) => {
+    const activeEffects = effectsToApply.filter((effect) => effect && effect.enabled !== false)
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+    const exclusiveKinds = new Set(['color', 'tag', 'fade']);
+    const selectedKinds = new Set();
+    activeEffects.filter((effect) => !exclusiveKinds.has(effect.kind) || !selectedKinds.has(effect.kind)).forEach((effect) => {
+      if (exclusiveKinds.has(effect.kind)) selectedKinds.add(effect.kind);
       if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) row.style.setProperty('--ld-tle-effect-color', effect.color);
       if (effect.kind === 'tag') {
         row.classList.add(`${EFFECT_CLASS}--tag-highlight`);
@@ -634,6 +652,7 @@
        keyword: String(r.keyword).trim(),
        effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
        color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
+       priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
        enabled: r.enabled !== false,
      })) : [];
     return { parsed, importedEffects, importedCats, importedTags, importedRules };
@@ -793,6 +812,7 @@
           <input type="text" class="ld-tle-panel__cat-label" placeholder="新分组名">
           <div class="ld-tle-panel__cat-effect ld-tle-panel__effect-choices"></div>
           <input type="color" class="ld-tle-panel__cat-color" value="#0969da" title="分组颜色">
+          <input type="number" class="ld-tle-panel__cat-priority" value="10000" title="分组优先级">
           <button type="button" data-act="add-cat">添加分组</button>
         </div>
         <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>只显示在用户名旁，可多选</span></div></div>
@@ -814,6 +834,7 @@
           <input type="text" class="ld-tle-panel__keyword" placeholder="关键词，例如：抽奖">
           <div class="ld-tle-panel__keyword-cat ld-tle-panel__effect-choices"></div>
           <input type="color" class="ld-tle-panel__keyword-color" value="#0969da" title="颜色标记颜色">
+          <input type="number" class="ld-tle-panel__keyword-priority" value="5000" title="关键词优先级">
           <button type="button" data-act="add-keyword">添加规则</button>
         </div>
       </section>
@@ -864,7 +885,8 @@
       const label = (panelEl.querySelector('.ld-tle-panel__cat-label').value || '').trim();
        const effectIds = [...panelEl.querySelectorAll('.ld-tle-panel__cat-effect input:checked')].map((input) => input.value);
        const color = panelEl.querySelector('.ld-tle-panel__cat-color').value;
-       const cat = addCategory(label, effectIds, color);
+       const priority = Number(panelEl.querySelector('.ld-tle-panel__cat-priority').value);
+       const cat = addCategory(label, effectIds, color, priority);
       if (!cat) { showPanelMsg('效果名无效或已存在'); return; }
       panelEl.querySelector('.ld-tle-panel__cat-label').value = '';
       showPanelMsg(`已添加分类「${cat.label}」`);
@@ -882,12 +904,13 @@
       const keyword = input.value.trim();
        const effectIds = [...panelEl.querySelectorAll('.ld-tle-panel__keyword-cat input:checked')].map((input) => input.value);
        const color = panelEl.querySelector('.ld-tle-panel__keyword-color').value;
+       const priority = Number(panelEl.querySelector('.ld-tle-panel__keyword-priority').value);
        if (!keyword || !effectIds.length) { showPanelMsg('请输入关键词并选择效果'); return; }
       if (keywordRules.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase())) {
         showPanelMsg('关键词已存在');
         return;
       }
-       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, color, enabled: true });
+       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, color, priority: Number.isFinite(priority) ? priority : 5000, enabled: true });
       saveKeywordRules();
       input.value = '';
       renderKeywords();
@@ -910,6 +933,7 @@
     if (!box) return;
     box.innerHTML = '';
     DEFAULT_EFFECTS.filter((effect) => !EFFECT_LIBRARY_IDS.has(effect.id)).forEach((effect) => {
+      const savedEffect = getEffect(effect.id) || effect;
       const row = document.createElement('label');
       row.className = 'ld-tle-panel__builtin-row';
        const enabled = document.createElement('input');
@@ -920,7 +944,18 @@
       name.textContent = effect.label;
       const hint = document.createElement('small');
       hint.textContent = effect.hint;
-      row.append(enabled, name, hint);
+      const priority = document.createElement('input');
+      priority.type = 'number';
+       priority.value = savedEffect.priority ?? effect.priority ?? 0;
+      priority.title = '规则优先级';
+      priority.addEventListener('change', () => {
+        const value = Number(priority.value);
+        const saved = getEffect(effect.id);
+        if (saved && Number.isFinite(value)) saved.priority = value;
+        saveEffects();
+        applyMarks();
+      });
+      row.append(enabled, name, hint, priority);
       box.append(row);
     });
   }
@@ -939,13 +974,14 @@
     if (patch.label != null && String(patch.label).trim()) group.label = String(patch.label).trim();
     if (patch.effectIds) group.effectIds = libraryEffectIds(patch.effectIds).filter((effectId) => getEffect(effectId));
     if (patch.color && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color)) group.color = patch.color;
+    if (patch.priority != null && Number.isFinite(Number(patch.priority))) group.priority = Number(patch.priority);
     saveCats();
     fillCatSelects();
     renderCats();
     applyMarks();
   }
 
-  function addCategory(label, effectIds, color) {
+  function addCategory(label, effectIds, color, priority) {
     const name = String(label || '').trim();
     if (!name) return null;
     if (cats.some((c) => c.label === name)) return null;
@@ -956,7 +992,7 @@
       id = id + '-' + n;
     }
     const ids = libraryEffectIds(effectIds).filter((effectId) => getEffect(effectId));
-    const cat = normalizeCat({ id, label: name, color, effectIds: ids.length ? ids : ['color-mark'] });
+    const cat = normalizeCat({ id, label: name, color, priority, effectIds: ids.length ? ids : ['left-highlight'] });
     if (!cat) return null;
     cats.push(cat);
     saveCats();
@@ -1027,7 +1063,7 @@
       label.textContent = effect.label;
       const kind = document.createElement('span');
        kind.textContent = effect.kind === 'color' ? '左侧高亮' : effect.kind === 'tag' ? '关键词/tag 高亮' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
-      const hint = document.createElement('small');
+       const hint = document.createElement('small');
       hint.textContent = effect.hint;
       row.append(swatch, label, kind, hint);
       box.append(row);
@@ -1105,11 +1141,16 @@
        color.value = rule.color || '#0969da';
        color.title = '颜色标记颜色';
        color.addEventListener('change', () => { rule.color = color.value; saveKeywordRules(); applyMarks(); });
+       const priority = document.createElement('input');
+       priority.type = 'number';
+       priority.value = rule.priority ?? 5000;
+       priority.title = '关键词优先级';
+       priority.addEventListener('change', () => { rule.priority = Number(priority.value) || 0; saveKeywordRules(); applyMarks(); });
       enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
       up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
       down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
       del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
-       row.append(word, select, color, enabled, up, down, del);
+       row.append(word, select, color, priority, enabled, up, down, del);
       box.append(row);
     });
   }
@@ -1217,14 +1258,19 @@
        color.type = 'color';
        color.value = c.color || (boundEffects(c.effectIds)[0] || {}).color || '#0969da';
        color.title = '分组颜色';
+       const priority = document.createElement('input');
+       priority.type = 'number';
+       priority.value = c.priority ?? 10000;
+       priority.title = '分组优先级';
       const del = document.createElement('button');
       del.type = 'button';
       del.textContent = '删';
       label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
        effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.querySelectorAll('input:checked')].map((option) => option.value) }));
        color.addEventListener('change', () => updateGroup(c.id, { color: color.value }));
+       priority.addEventListener('change', () => updateGroup(c.id, { priority: priority.value }));
       del.addEventListener('click', () => removeCategory(c.id));
-       row.append(label, effect, color, del);
+       row.append(label, effect, color, priority, del);
       box.append(row);
     });
   }
@@ -1836,13 +1882,14 @@
       .ld-tle-panel__effect-row:last-child { border-bottom: 0; }
       .ld-tle-panel__effect-swatch { width: 24px; height: 24px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
       .ld-tle-panel__effect-row small, .ld-tle-panel__builtin-row small { color: #8b949e; }
-      .ld-tle-panel__builtin-row { display: grid; grid-template-columns: 28px minmax(100px, 1fr) minmax(100px, 1.5fr); gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__builtin-row { display: grid; grid-template-columns: 28px minmax(100px, 1fr) minmax(100px, 1.5fr) 68px; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__builtin-row:last-child { border-bottom: 0; }
       .ld-tle-panel__effect-choices { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
       .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
       .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
       .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
-      .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 2fr) 32px 38px; gap: 7px; align-items: center; padding: 7px 0; }
+      .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 2fr) 32px 68px 38px; gap: 7px; align-items: center; padding: 7px 0; }
+      .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; padding: 5px 6px; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
       .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
       .ld-tle-panel__cat input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
@@ -1870,7 +1917,7 @@
       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
-      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) 32px 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) 32px 68px 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
@@ -1887,7 +1934,7 @@
         .ld-tle-panel__stat { padding: 8px; }
          .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
          .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
-         .ld-tle-panel__cat { grid-template-columns: 1fr 32px 38px; }
+         .ld-tle-panel__cat { grid-template-columns: 1fr 32px 68px 38px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
          .ld-tle-panel__keyword-row { grid-template-columns: 1fr 28px 28px 28px 34px; gap: 4px; }
          .ld-tle-panel__keyword-row .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
