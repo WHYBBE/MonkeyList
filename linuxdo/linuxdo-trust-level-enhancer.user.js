@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.35.0
+// @version      0.36.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -1257,7 +1257,7 @@
     panelEl.querySelector('.ld-tle-panel__stat-tags').textContent = tags.length;
     const entries = Object.entries(marks)
       .filter(([user, info]) => {
-         if (filter && !(info.effects || [info.effect || info.level]).includes(filter)) return false;
+         if (filter && info.level !== filter) return false;
         if (!q) return true;
         return user.includes(q) || (info.note || '').toLowerCase().includes(q);
       })
@@ -1279,13 +1279,11 @@
         <button type="button" data-act="del">删</button>
       `;
        const sel = row.querySelector('select');
-       sel.multiple = true;
-       sel.size = Math.min(4, Math.max(2, effects.length));
        cats.forEach((m) => {
          const opt = document.createElement('option');
          opt.value = m.id;
          opt.textContent = m.label;
-         if ((info.groupId === m.id) || (info.effects || [info.effect || info.level]).some((id) => (m.effectIds || []).includes(id))) opt.selected = true;
+         if (m.id === info.level) opt.selected = true;
          sel.append(opt);
        });
       const note = row.querySelector('input');
@@ -1300,13 +1298,13 @@
         tagButton.addEventListener('click', () => {
           tagButton.classList.toggle('is-on');
           const selectedTags = [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag);
-           setMark(user, sel.selectedOptions[0]?.value, note.value, { effects: [...sel.selectedOptions].map((option) => option.value), tags: selectedTags, keepPanel: true });
+            setMark(user, sel.value, note.value, { effects: [sel.value], tags: selectedTags, keepPanel: true });
         });
         tagButton.dataset.tag = tag.id;
         tagBox.append(tagButton);
       });
-       sel.addEventListener('change', () => setMark(user, sel.selectedOptions[0]?.value, note.value, { effects: [...sel.selectedOptions].map((option) => option.value), tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
-       note.addEventListener('change', () => setMark(user, sel.selectedOptions[0]?.value, note.value, { effects: [...sel.selectedOptions].map((option) => option.value), tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+       sel.addEventListener('change', () => setMark(user, sel.value, note.value, { effects: [sel.value], tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+       note.addEventListener('change', () => setMark(user, sel.value, note.value, { effects: [sel.value], tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
       row.querySelector('[data-act="del"]').addEventListener('click', () => {
         setMark(user, null);
         renderPanelList();
