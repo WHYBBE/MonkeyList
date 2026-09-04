@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.17.0
+// @version      0.24.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -27,18 +27,37 @@
   const MARK_KEY = 'ld-tle-marks';
   const CATS_KEY = 'ld-tle-mark-cats';
   const TAGS_KEY = 'ld-tle-mark-tags';
+  const KEYWORDS_KEY = 'ld-tle-keyword-rules';
+  const EFFECTS_KEY = 'ld-tle-topic-effects';
   const MARK_STYLE_ID = 'ld-tle-mark-dyn';
   const MARK_CLASS = 'ld-tle-mark';
+  const EFFECT_CLASS = 'ld-tle-effect';
   const MARK_BADGE = 'ld-tle-mark-badge';
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
   const DEFAULT_CATS = [
-    { id: 'block', label: '屏蔽', color: '#6e7681', effect: 'dim', hint: '弱化显示' },
-    { id: 'caution', label: '注意', color: '#d4a72c', effect: 'tint', hint: '黄色警示' },
-    { id: 'watch', label: '关注', color: '#0969da', effect: 'tint', hint: '蓝色高亮' },
-    { id: 'friend', label: '友好', color: '#1a7f37', effect: 'tint', hint: '绿色高亮' },
-    { id: 'vip', label: '重要', color: '#d4a72c', effect: 'tint', hint: '金色强调' },
+    { id: 'block', label: '屏蔽', color: '#6e7681', effect: 'dim', effectId: 'promo-dim', hint: '弱化显示' },
+    { id: 'caution', label: '注意', color: '#d4a72c', effect: 'tint', effectId: 'rich', hint: '黄色警示' },
+    { id: 'watch', label: '关注', color: '#0969da', effect: 'tint', effectId: 'normal', hint: '蓝色高亮' },
+    { id: 'friend', label: '友好', color: '#1a7f37', effect: 'tint', effectId: 'normal', hint: '绿色高亮' },
+    { id: 'vip', label: '重要', color: '#d4a72c', effect: 'tint', effectId: 'rich', hint: '金色强调' },
   ];
+  const DEFAULT_EFFECTS = [
+    { id: 'normal', label: '无额外效果', color: '#6e7681', mode: 'normal', kind: 'none', priority: 0, hint: '只显示标记' },
+    { id: 'lv1', label: 'Lv1颜色', color: '#0969da', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv1 左侧颜色线' },
+    { id: 'lv2', label: 'Lv2颜色', color: '#1a7f37', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv2 左侧颜色线' },
+    { id: 'lv3', label: 'Lv3颜色', color: '#d4a72c', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv3 左侧颜色线' },
+    { id: 'lv4', label: 'Lv4颜色', color: '#8250df', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv4 左侧颜色线' },
+    { id: 'rich', label: '富可敌国颜色', color: '#d4a72c', mode: 'normal', kind: 'color', priority: 30, hint: '金色左侧颜色线' },
+    { id: 'welfare', label: '福利羊毛颜色', color: '#e45735', mode: 'normal', kind: 'color', priority: 30, hint: '福利内容颜色线' },
+    { id: 'fade1', label: '淡化等级 1', color: '#9aa4af', mode: 'dim', kind: 'fade', priority: 20, hint: '降低透明度和饱和度' },
+    { id: 'fade2', label: '淡化等级 2 / 删除线', color: '#6e7681', mode: 'normal', kind: 'strike', priority: 20, hint: '增加删除线效果' },
+    { id: 'promo-dim', label: '推广淡化', color: '#9aa4af', mode: 'dim', kind: 'fade', priority: 20, hint: '原推广淡化效果' },
+    { id: 'lottery-dim', label: '抽奖淡化', color: '#8250df', mode: 'dim', kind: 'fade', priority: 20, hint: '原抽奖淡化效果' },
+    { id: 'stale-dim', label: '过期淡化', color: '#6e7681', mode: 'dim', kind: 'fade', priority: 10, hint: '原过期淡化效果' },
+    { id: 'lonely', label: '待回复', color: '#9a6700', mode: 'normal', kind: 'badge', priority: 20, hint: '标记待回复主题' },
+  ].map((effect) => ({ ...effect, builtin: true, enabled: true }));
+  const BUILTIN_EFFECT_IDS = new Set(DEFAULT_EFFECTS.map((effect) => effect.id));
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
@@ -47,9 +66,17 @@
   let cachedTopicId = null;
   let cats = loadCats();
   let tags = loadTags();
+  let effects = loadEffects();
+  let keywordRules = loadKeywordRules();
   let marks = loadMarks();
   let pickerEl = null;
   let panelEl = null;
+
+  cats.forEach((group) => {
+    if (!group.effectId || !getEffect(group.effectId)) {
+      group.effectId = getEffect(group.id) ? group.id : effects[0].id;
+    }
+  });
 
   function normalizeCat(raw) {
     if (!raw || typeof raw !== 'object') return null;
@@ -59,7 +86,7 @@
     const effect = ['normal', 'tint', 'dim'].includes(raw.effect) ? raw.effect : 'tint';
     const hint = String(raw.hint || '').trim();
     if (!id || !label) return null;
-    return { id, label, color, effect, hint };
+    return { id, label, color, effect, effectId: String(raw.effectId || id), hint };
   }
 
   function loadCats() {
@@ -78,6 +105,75 @@
 
   function getCat(id) {
     return cats.find((c) => c.id === id) || null;
+  }
+
+  function normalizeEffect(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const label = String(raw.label || raw.name || '').trim();
+    const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '#6e7681';
+    const mode = ['normal', 'tint', 'dim'].includes(raw.mode) ? raw.mode : 'normal';
+    if (!id || !label) return null;
+    return {
+      id, label, color, mode,
+      kind: ['none', 'color', 'fade', 'strike', 'badge'].includes(raw.kind) ? raw.kind : 'color',
+      priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0,
+      hint: String(raw.hint || '').trim(),
+      builtin: !!raw.builtin,
+      enabled: raw.enabled !== false,
+    };
+  }
+
+  function loadEffects() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(EFFECTS_KEY) || 'null');
+      const saved = Array.isArray(raw) ? raw.map(normalizeEffect).filter(Boolean) : [];
+      const byId = new Map(DEFAULT_EFFECTS.map((effect) => [effect.id, { ...effect }]));
+      // Keep all existing user categories usable as effects after the migration.
+      cats.forEach((cat) => byId.set(cat.id, normalizeEffect({
+        id: cat.id,
+        label: cat.label,
+        color: cat.color,
+        mode: cat.effect,
+        hint: cat.hint,
+      })));
+      saved.forEach((effect) => {
+        if (isBuiltinEffect(effect.id)) {
+          byId.get(effect.id).enabled = effect.enabled !== false;
+        } else {
+          byId.set(effect.id, { ...effect, builtin: false });
+        }
+      });
+      return [...byId.values()];
+    } catch (e) {
+      return DEFAULT_EFFECTS.map((effect) => ({ ...effect }));
+    }
+  }
+
+  function saveEffects() {
+    localStorage.setItem(EFFECTS_KEY, JSON.stringify(effects));
+  }
+
+  function getEffect(id) {
+    return effects.find((effect) => effect.id === id) || null;
+  }
+
+  function isBuiltinEffect(id) {
+    return BUILTIN_EFFECT_IDS.has(id);
+  }
+
+  function boundEffect(value) {
+    if (!value) return null;
+    const direct = getEffect(value);
+    if (direct) return direct;
+    const cat = getCat(value);
+    if (!cat) return null;
+    return getEffect(cat.effectId) || { id: `category-${cat.id}`, label: cat.label, color: cat.color, mode: cat.effect, hint: cat.hint };
+  }
+
+  function boundEffects(value) {
+    const ids = Array.isArray(value) ? value : [value];
+    return ids.map((id) => boundEffect(id)).filter(Boolean).filter((effect) => effect.enabled !== false);
   }
 
   function normalizeTag(raw) {
@@ -106,6 +202,43 @@
     return tags.find((t) => t.id === id) || null;
   }
 
+  function loadKeywordRules() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEYWORDS_KEY) || '[]');
+      return Array.isArray(raw) ? raw.filter((r) => r && r.keyword && (r.effect || r.category)).map((r, index) => ({
+        id: String(r.id || `rule-${index + 1}`),
+        keyword: String(r.keyword).trim(),
+        category: String(r.category || r.effect),
+        effect: String(r.effect || r.category),
+        enabled: r.enabled !== false,
+      })) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveKeywordRules() {
+    localStorage.setItem(KEYWORDS_KEY, JSON.stringify(keywordRules));
+  }
+
+  function keywordCategory(row) {
+    const title = row.querySelector('.raw-topic-link, .title, .link-top-line')?.textContent || '';
+    const tagsText = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')].map((el) => el.textContent).join(' ');
+    const haystack = `${title} ${tagsText}`.toLowerCase();
+    const rule = keywordRules.find((r) => r.enabled && r.keyword && haystack.includes(r.keyword.toLowerCase()) && boundEffects(r.effects || r.effect || r.category).length);
+    return rule ? { rule, effects: boundEffects(rule.effects || rule.effect || rule.category) } : null;
+  }
+
+  function moveKeywordRule(id, direction) {
+    const index = keywordRules.findIndex((rule) => rule.id === id);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= keywordRules.length) return;
+    [keywordRules[index], keywordRules[next]] = [keywordRules[next], keywordRules[index]];
+    saveKeywordRules();
+    renderKeywords();
+    applyMarks();
+  }
+
   function normalizeTagIds(list) {
     const seen = new Set();
     const out = [];
@@ -129,6 +262,8 @@
             level,
             note: (v && v.note) || '',
             tags: Array.isArray(v && v.tags) ? v.tags.map(String) : [],
+            effect: (v && v.effect) || level,
+            effects: Array.isArray(v && v.effects) ? v.effects.map(String) : [(v && v.effect) || level],
             at: (v && v.at) || Date.now(),
           };
         }
@@ -153,10 +288,12 @@
     if (!user) return;
     if (!level) {
       delete marks[user];
-    } else if (getCat(level)) {
+    } else if (getCat(level) || getEffect(level)) {
       const prev = marks[user] || {};
       marks[user] = {
         level,
+        effect: opts && opts.effect ? opts.effect : (prev.effect || level),
+        effects: opts && opts.effects ? opts.effects.map(String) : (prev.effects || [prev.effect || level]),
         note: note != null ? String(note) : (prev.note || ''),
         tags: opts && opts.tags != null ? normalizeTagIds(opts.tags) : (prev.tags || []),
         at: Date.now(),
@@ -191,12 +328,11 @@
   }
 
   function markClassList(el) {
-    [...el.classList].filter((c) => c.startsWith(MARK_CLASS + '--')).forEach((c) => el.classList.remove(c));
+    [...el.classList].filter((c) => c.startsWith(MARK_CLASS + '--') || c.startsWith(EFFECT_CLASS + '--')).forEach((c) => el.classList.remove(c));
   }
 
   function applyMarks() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
-      markClassList(row);
       const posters = row.querySelector('td.posters');
       const opLink = posters && (
         [...posters.querySelectorAll('a[data-user-card]')].find((a) => {
@@ -206,9 +342,18 @@
       );
       const user = opLink && opLink.getAttribute('data-user-card');
       const mark = getMark(user);
-      if (mark && getCat(mark.level)) row.classList.add(`${MARK_CLASS}--${mark.level}`);
+      const keywordMatch = keywordCategory(row);
+      const candidates = [];
+      if (mark) boundEffects(mark.effects || mark.effect || mark.level).forEach((effect) => candidates.push({ ...effect, priority: 10000 }));
+      if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: 5000 }));
+      reusableEffectForRow(row).forEach((effect) => {
+        if (effect) candidates.push({ ...effect, priority: effect.priority || 0 });
+      });
+      applyTopicEffects(row, candidates);
       const title = row.querySelector('.link-top-line, td.main-link');
+      title?.querySelectorAll('.ld-tle-keyword-badge').forEach((el) => el.remove());
       paintBadges(title, mark, null);
+      if (keywordMatch && !mark) setEffectBadge(title, keywordMatch.effects[0], keywordMatch.rule.keyword);
     });
 
     document.querySelectorAll('article[id^="post_"]').forEach((post) => {
@@ -224,6 +369,43 @@
       const name = cardUsername(card);
       decorateUserCard(card, name, getMark(name));
     });
+  }
+
+  function reusableEffectForRow(row) {
+    const result = [];
+    if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('promo-dim'));
+    if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('lottery-dim'));
+    if (row.classList.contains(STALE_CLASS)) result.push(getEffect('stale-dim'));
+    if (row.classList.contains(LONELY_CLASS)) result.push(getEffect('lonely'));
+    if (row.querySelector('.' + WELFARE_BADGE_CLASS)) result.push(getEffect('welfare'));
+    const levelClass = [...row.querySelectorAll('td.main-link')].flatMap((td) => [...td.classList]).find((name) => /^ld-tle-row--[1-4]$/.test(name));
+    if (levelClass) result.push(getEffect(levelClass.replace('ld-tle-row--', 'lv')));
+    return result.filter(Boolean);
+  }
+
+  // Shared effect layer: user marks and future rules can use the same topic-row behavior.
+  function applyTopicEffects(row, effectsToApply) {
+    markClassList(row);
+    const seen = new Set();
+    effectsToApply.filter((effect) => effect && effect.enabled !== false).sort((a, b) => (b.priority || 0) - (a.priority || 0)).forEach((effect) => {
+      if (!seen.has(effect.id)) {
+        seen.add(effect.id);
+        row.classList.add(`${EFFECT_CLASS}--${effect.id}`);
+      }
+    });
+  }
+
+  function setEffectBadge(host, effect, keyword) {
+    if (!host || !effect) return;
+    let badge = host.querySelector(':scope > .ld-tle-keyword-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'ld-tle-keyword-badge';
+      host.append(badge);
+    }
+    badge.className = `ld-tle-keyword-badge ${MARK_BADGE} ${MARK_BADGE}--effect-${effect.id}`;
+    badge.textContent = effect.label;
+    badge.title = `关键词：${keyword}`;
   }
 
   function decorateUserCard(card, username, mark) {
@@ -264,10 +446,10 @@
 
   function paintBadges(host, mark, username) {
     if (!host) return;
-    const cat = mark && getCat(mark.level);
+    const effect = mark && boundEffect(mark.effect || mark.level);
     const tagIds = mark ? normalizeTagIds(mark.tags) : [];
     const wanted = [];
-    if (cat) wanted.push({ kind: 'cat', id: cat.id, label: cat.label, title: (mark && mark.note) || cat.hint || cat.label });
+    if (effect) wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label });
     tagIds.forEach((id) => {
       const t = getTag(id);
       if (t) wanted.push({ kind: 'tag', id: t.id, label: t.label, title: t.label });
@@ -323,11 +505,11 @@
     const tagBox = document.createElement('div');
     tagBox.className = 'ld-tle-picker__tags';
     pickerEl.append(head, levels, tagBox, note, actions);
-    cats.forEach((meta) => {
+      effects.forEach((meta) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.dataset.level = meta.id;
-      b.className = `ld-tle-picker__lv ld-tle-picker__lv--${meta.id}${current && current.level === meta.id ? ' is-on' : ''}`;
+      b.className = `ld-tle-picker__lv ld-tle-picker__lv--${meta.id}${current && (current.effect || current.level) === meta.id ? ' is-on' : ''}`;
       b.textContent = meta.label;
       b.title = meta.hint || meta.label;
       b.addEventListener('click', () => {
@@ -371,10 +553,12 @@
 
   function exportMarks() {
     return JSON.stringify({
-      version: 3,
+      version: 4,
       exportedAt: new Date().toISOString(),
+      effects,
       cats,
       tags,
+      keywordRules,
       marks,
     }, null, 2);
   }
@@ -392,47 +576,62 @@
     const parsed = [];
     for (const item of entries) {
       const username = String(item.username || item.user || item.name || '').trim().toLowerCase();
-      const level = item.level || item.mark || item.tag;
+      const level = item.effect || item.level || item.mark || item.tag;
       if (!username || !level) continue;
       parsed.push({
         username,
         level,
+        effect: item.effect || item.level,
         note: item.note || '',
         tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
         at: item.at || Date.now(),
       });
     }
+    const importedEffects = Array.isArray(data && data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
     const importedCats = Array.isArray(data && data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
     const importedTags = Array.isArray(data && data.tags) ? data.tags.map(normalizeTag).filter(Boolean) : [];
-    return { parsed, importedCats, importedTags };
+    const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && (r.effect || r.category)).map((r) => ({
+      id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
+      keyword: String(r.keyword).trim(),
+      category: String(r.category || r.effect),
+      enabled: r.enabled !== false,
+    })) : [];
+    return { parsed, importedEffects, importedCats, importedTags, importedRules };
   }
 
-  function mergeImported(parsed, importedCats, importedTags, mode) {
+  function mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode) {
     let added = 0;
     let updated = 0;
     let skipped = 0;
+    importedEffects.forEach((effect) => {
+      if (!getEffect(effect.id)) effects.push(effect);
+    });
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
+      if (!getEffect(cat.id)) effects.push(normalizeEffect({ id: cat.id, label: cat.label, color: cat.color, mode: cat.effect, hint: cat.hint }));
     });
     importedTags.forEach((tag) => {
       if (!getTag(tag.id)) tags.push(tag);
     });
+    importedRules.forEach((rule) => {
+      if (!keywordRules.some((r) => r.keyword.toLowerCase() === rule.keyword.toLowerCase())) keywordRules.push(rule);
+    });
     for (const item of parsed) {
-      if (!getCat(item.level)) {
-        cats.push({ id: item.level, label: item.level, color: '#0969da', effect: 'normal', hint: '' });
+      if (!getEffect(item.level)) {
+        effects.push({ id: item.level, label: item.level, color: '#0969da', mode: 'normal', hint: '' });
       }
       (item.tags || []).forEach((id) => {
         if (!getTag(id)) tags.push({ id, label: id, color: '#8250df' });
       });
       const prev = marks[item.username];
       if (!prev) {
-        marks[item.username] = { level: item.level, note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { level: item.level, effect: item.effect || item.level, note: item.note, tags: item.tags || [], at: item.at };
         added++;
         continue;
       }
       if (mode === 'skip') { skipped++; continue; }
       if (mode === 'replace') {
-        marks[item.username] = { level: item.level, note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { level: item.level, effect: item.effect || item.level, note: item.note, tags: item.tags || [], at: item.at };
         updated++;
         continue;
       }
@@ -440,11 +639,14 @@
         ? (prev.note ? `${prev.note} | ${item.note}` : item.note)
         : prev.note;
       const mergedTags = [...new Set([...(prev.tags || []), ...(item.tags || [])])];
-      marks[item.username] = { level: item.level, note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
+      marks[item.username] = { level: item.level, effect: item.effect || prev.effect || item.level, note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
       updated++;
     }
     saveCats();
+      saveEffects();
+    fillCatSelects();
     saveTags();
+    saveKeywordRules();
     saveMarks();
     updateMarkStyles();
     applyMarks();
@@ -493,6 +695,7 @@
     ensurePanel();
     panelEl.classList.add('is-open');
     fillCatSelects();
+    renderEffects();
     renderCats();
     renderTags();
     renderPanelList();
@@ -519,10 +722,16 @@
       </div>
       <div class="ld-tle-panel__nav" role="tablist">
         <button type="button" class="is-active" data-pane="users">用户 <span class="ld-tle-panel__count"></span></button>
-        <button type="button" data-pane="labels">分类与标签</button>
-        <button type="button" data-pane="data">导入导出</button>
+      <button type="button" data-pane="labels">效果库</button>
+        <button type="button" data-pane="keywords">关键词</button>
+        <button type="button" data-pane="data">数据</button>
       </div>
       <section class="ld-tle-panel__pane is-active" data-pane="users">
+        <div class="ld-tle-panel__overview">
+          <div class="ld-tle-panel__stat"><strong class="ld-tle-panel__stat-users">0</strong><span>已标记用户</span></div>
+          <div class="ld-tle-panel__stat"><strong class="ld-tle-panel__stat-cats">0</strong><span>可复用效果</span></div>
+          <div class="ld-tle-panel__stat"><strong class="ld-tle-panel__stat-tags">0</strong><span>子标签</span></div>
+        </div>
         <div class="ld-tle-panel__add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__user" placeholder="输入用户名">
           <select class="ld-tle-panel__lv"></select>
@@ -535,20 +744,36 @@
         <div class="ld-tle-panel__list"></div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="labels">
-        <div class="ld-tle-panel__section-head"><div><strong>主分类</strong><span>控制话题列表效果</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>效果库</strong><span>独立管理，可被分组和关键词重复使用</span></div></div>
+        <div class="ld-tle-panel__effects"></div>
+      <div class="ld-tle-panel__effect-add ld-tle-panel__card">
+        <input type="text" class="ld-tle-panel__effect-label" placeholder="新效果名">
+        <input type="color" class="ld-tle-panel__effect-color" value="#0969da" title="颜色">
+        <select class="ld-tle-panel__effect-kind"><option value="color">颜色</option><option value="fade">淡化</option><option value="strike">删除线</option><option value="badge">提示标记</option></select>
+        <button type="button" data-act="add-effect">添加效果</button>
+        </div>
+        <div class="ld-tle-panel__section-head"><div><strong>分组</strong><span>分组只负责组织用户，不拥有独立样式</span></div></div>
         <div class="ld-tle-panel__cats"></div>
         <div class="ld-tle-panel__cat-add ld-tle-panel__card">
-          <input type="text" class="ld-tle-panel__cat-label" placeholder="新分类名">
-          <input type="color" class="ld-tle-panel__cat-color" value="#0969da" title="颜色">
-          <select class="ld-tle-panel__cat-effect"><option value="normal">普通</option><option value="tint">高亮</option><option value="dim">弱化</option></select>
-          <button type="button" data-act="add-cat">添加</button>
+          <input type="text" class="ld-tle-panel__cat-label" placeholder="新分组名">
+          <select class="ld-tle-panel__cat-effect"></select>
+          <button type="button" data-act="add-cat">添加分组</button>
         </div>
-        <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>显示在用户名旁，可多选</span></div></div>
+        <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>只显示在用户名旁，可多选</span></div></div>
         <div class="ld-tle-panel__tags"></div>
         <div class="ld-tle-panel__tag-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__tag-label" placeholder="新标签名">
           <input type="color" class="ld-tle-panel__tag-color" value="#8250df" title="颜色">
           <button type="button" data-act="add-tag">添加</button>
+        </div>
+      </section>
+      <section class="ld-tle-panel__pane" data-pane="keywords">
+        <div class="ld-tle-panel__section-head"><div><strong>关键词规则</strong><span>命中话题标题或主题标签后应用指定效果</span></div></div>
+        <div class="ld-tle-panel__keywords"></div>
+        <div class="ld-tle-panel__keyword-add ld-tle-panel__card">
+          <input type="text" class="ld-tle-panel__keyword" placeholder="关键词，例如：抽奖">
+          <select class="ld-tle-panel__keyword-cat"></select>
+          <button type="button" data-act="add-keyword">添加规则</button>
         </div>
       </section>
       <section class="ld-tle-panel__pane" data-pane="data">
@@ -596,10 +821,9 @@
     });
     panelEl.querySelector('[data-act="add-cat"]').addEventListener('click', () => {
       const label = (panelEl.querySelector('.ld-tle-panel__cat-label').value || '').trim();
-      const color = panelEl.querySelector('.ld-tle-panel__cat-color').value;
-      const effect = panelEl.querySelector('.ld-tle-panel__cat-effect').value;
-      const cat = addCategory(label, color, effect);
-      if (!cat) { showPanelMsg('分类名无效或已存在'); return; }
+      const effectId = panelEl.querySelector('.ld-tle-panel__cat-effect').value;
+      const cat = addCategory(label, effectId);
+      if (!cat) { showPanelMsg('效果名无效或已存在'); return; }
       panelEl.querySelector('.ld-tle-panel__cat-label').value = '';
       showPanelMsg(`已添加分类「${cat.label}」`);
     });
@@ -611,10 +835,38 @@
       panelEl.querySelector('.ld-tle-panel__tag-label').value = '';
       showPanelMsg(`已添加标签「${tag.label}」`);
     });
+    panelEl.querySelector('[data-act="add-effect"]').addEventListener('click', () => {
+      const label = panelEl.querySelector('.ld-tle-panel__effect-label').value.trim();
+      const color = panelEl.querySelector('.ld-tle-panel__effect-color').value;
+      const kind = panelEl.querySelector('.ld-tle-panel__effect-kind').value;
+      const effect = addEffect(label, color, kind);
+      if (!effect) { showPanelMsg('效果名无效或已存在'); return; }
+      panelEl.querySelector('.ld-tle-panel__effect-label').value = '';
+      showPanelMsg(`已添加效果「${effect.label}」`);
+    });
+    panelEl.querySelector('[data-act="add-keyword"]').addEventListener('click', () => {
+      const input = panelEl.querySelector('.ld-tle-panel__keyword');
+      const keyword = input.value.trim();
+      const effect = panelEl.querySelector('.ld-tle-panel__keyword-cat').value;
+      if (!keyword || !effect) { showPanelMsg('请输入关键词并选择效果'); return; }
+      if (keywordRules.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase())) {
+        showPanelMsg('关键词已存在');
+        return;
+      }
+      keywordRules.push({ id: `rule-${Date.now()}`, keyword, category: effect, effect, enabled: true });
+      saveKeywordRules();
+      input.value = '';
+      renderKeywords();
+      applyMarks();
+      showPanelMsg(`已添加关键词「${keyword}」`);
+    });
     document.body.append(panelEl);
     fillCatSelects();
+    fillEffectSelects();
     renderCats();
+    renderEffects();
     renderTags();
+    renderKeywords();
   }
 
   function slugify(label) {
@@ -625,7 +877,32 @@
     return 'cat-' + (h >>> 0).toString(36);
   }
 
-  function addCategory(label, color, effect) {
+  function addEffect(label, color, kind) {
+    const name = String(label || '').trim();
+    if (!name || effects.some((e) => e.label === name)) return null;
+    const id = uniqueId(name, (value) => !!getEffect(value));
+    const effect = normalizeEffect({ id, label: name, color, kind, mode: kind === 'fade' ? 'dim' : 'normal' });
+    if (!effect) return null;
+    effects.push(effect);
+    saveEffects();
+    updateMarkStyles();
+    fillEffectSelects();
+    renderEffects();
+    return effect;
+  }
+
+  function updateGroup(id, patch) {
+    const group = cats.find((cat) => cat.id === id);
+    if (!group) return;
+    if (patch.label != null && String(patch.label).trim()) group.label = String(patch.label).trim();
+    if (patch.effectId && getEffect(patch.effectId)) group.effectId = patch.effectId;
+    saveCats();
+    fillCatSelects();
+    renderCats();
+    applyMarks();
+  }
+
+  function addCategory(label, effectId) {
     const name = String(label || '').trim();
     if (!name) return null;
     if (cats.some((c) => c.label === name)) return null;
@@ -635,11 +912,11 @@
       while (getCat(id + '-' + n)) n++;
       id = id + '-' + n;
     }
-    const cat = normalizeCat({ id, label: name, color, effect });
+    const effect = getEffect(effectId) || effects[0];
+    const cat = normalizeCat({ id, label: name, color: effect.color, effect: effect.mode, effectId: effect.id });
     if (!cat) return null;
     cats.push(cat);
     saveCats();
-    updateMarkStyles();
     fillCatSelects();
     renderCats();
     applyMarks();
@@ -656,7 +933,14 @@
     }
     if (patch.color) cat.color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color) ? patch.color : cat.color;
     if (patch.effect && ['normal', 'tint', 'dim'].includes(patch.effect)) cat.effect = patch.effect;
+    const effect = getEffect(id);
+    if (effect) {
+      effect.label = cat.label;
+      effect.color = cat.color;
+      effect.mode = cat.effect;
+    }
     saveCats();
+    saveEffects();
     updateMarkStyles();
     fillCatSelects();
     renderCats();
@@ -665,36 +949,182 @@
   }
 
   function removeCategory(id) {
-    if (cats.length <= 1) { showPanelMsg('至少保留一个分类'); return; }
-    cats = cats.filter((c) => c.id !== id);
-    const fallback = cats[0].id;
-    Object.keys(marks).forEach((user) => {
-      if (marks[user].level === id) marks[user].level = fallback;
+    cats = cats.filter((group) => group.id !== id);
+    saveCats();
+    renderCats();
+  }
+
+  function removeEffect(id) {
+    const effect = getEffect(id);
+    if (!effect || effect.builtin || effects.length <= 1) return;
+    const fallback = effects.find((item) => item.id !== id);
+    effects = effects.filter((item) => item.id !== id);
+    cats.forEach((group) => {
+      if (group.effectId === id) group.effectId = fallback.id;
     });
+    Object.values(marks).forEach((mark) => {
+      if (mark.effect === id) mark.effect = fallback.id;
+    });
+    keywordRules.forEach((rule) => {
+      if (rule.effect === id || rule.category === id) {
+        rule.effect = fallback.id;
+        rule.category = fallback.id;
+      }
+    });
+    saveEffects();
     saveCats();
     saveMarks();
+    saveKeywordRules();
     updateMarkStyles();
     fillCatSelects();
+    renderEffects();
     renderCats();
     applyMarks();
-    if (panelEl && panelEl.classList.contains('is-open')) renderPanelList();
   }
 
   function fillCatSelects() {
     if (!panelEl) return;
     const filter = panelEl.querySelector('.ld-tle-panel__filter');
     const addSel = panelEl.querySelector('.ld-tle-panel__lv');
+    const keywordSel = panelEl.querySelector('.ld-tle-panel__keyword-cat');
+    const groupSel = panelEl.querySelector('.ld-tle-panel__cat-effect');
     const keepFilter = filter.value;
-    filter.innerHTML = '<option value="">全部分类</option>';
+    filter.innerHTML = '<option value="">全部效果</option>';
     addSel.innerHTML = '';
-    cats.forEach((c) => {
+    if (keywordSel) keywordSel.innerHTML = '';
+    if (groupSel) groupSel.innerHTML = '';
+    effects.forEach((c) => {
       const a = document.createElement('option');
       a.value = c.id;
       a.textContent = c.label;
       filter.append(a.cloneNode(true));
       addSel.append(a);
+      if (keywordSel) keywordSel.append(a.cloneNode(true));
+      if (groupSel) groupSel.append(a.cloneNode(true));
     });
     if ([...filter.options].some((o) => o.value === keepFilter)) filter.value = keepFilter;
+  }
+
+  function fillEffectSelects() {
+    fillCatSelects();
+  }
+
+  function renderEffects() {
+    if (!panelEl) return;
+    const box = panelEl.querySelector('.ld-tle-panel__effects');
+    if (!box) return;
+    box.innerHTML = '';
+    effects.forEach((effect) => {
+      const row = document.createElement('div');
+      row.className = 'ld-tle-panel__effect-row';
+      const swatch = document.createElement('input');
+      swatch.type = 'color';
+      swatch.value = effect.color;
+      const label = document.createElement('input');
+      label.type = 'text';
+      label.value = effect.label;
+      const kind = document.createElement('select');
+      kind.innerHTML = '<option value="color">颜色</option><option value="fade">淡化</option><option value="strike">删除线</option><option value="badge">提示标记</option><option value="none">无</option>';
+      kind.value = effect.kind;
+      const priority = document.createElement('input');
+      priority.type = 'number';
+      priority.min = '0';
+      priority.max = '9999';
+      priority.value = effect.priority || 0;
+      const enabled = document.createElement('input');
+      enabled.type = 'checkbox';
+      enabled.checked = effect.enabled !== false;
+      enabled.title = '启用效果';
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '删';
+      const builtin = isBuiltinEffect(effect.id);
+      swatch.disabled = builtin;
+      label.disabled = builtin;
+      kind.disabled = builtin;
+      priority.disabled = builtin;
+      del.disabled = builtin;
+      if (builtin) row.title = '内置效果不可编辑';
+      swatch.addEventListener('change', () => updateEffect(effect.id, { color: swatch.value }));
+      label.addEventListener('change', () => updateEffect(effect.id, { label: label.value }));
+      kind.addEventListener('change', () => updateEffect(effect.id, { kind: kind.value }));
+      priority.addEventListener('change', () => updateEffect(effect.id, { priority: priority.value }));
+      enabled.addEventListener('change', () => toggleEffect(effect.id, enabled.checked));
+      del.addEventListener('click', () => removeEffect(effect.id));
+      row.append(swatch, label, kind, priority, enabled, del);
+      box.append(row);
+    });
+  }
+
+  function toggleEffect(id, enabled) {
+    const effect = getEffect(id);
+    if (!effect) return;
+    effect.enabled = enabled;
+    saveEffects();
+    updateMarkStyles();
+    applyMarks();
+  }
+
+  function renderKeywords() {
+    if (!panelEl) return;
+    const box = panelEl.querySelector('.ld-tle-panel__keywords');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!keywordRules.length) {
+      box.innerHTML = '<div class="ld-tle-panel__empty">暂无关键词规则</div>';
+      return;
+    }
+    keywordRules.forEach((rule) => {
+      const row = document.createElement('div');
+      row.className = 'ld-tle-panel__keyword-row';
+      const word = document.createElement('input');
+      word.type = 'text';
+      word.value = rule.keyword;
+      const select = document.createElement('select');
+      effects.forEach((cat) => {
+        const option = document.createElement('option');
+        option.value = cat.id;
+        option.textContent = cat.label;
+        option.selected = cat.id === (rule.effect || rule.category);
+        select.append(option);
+      });
+      const enabled = document.createElement('input');
+      enabled.type = 'checkbox';
+      enabled.checked = rule.enabled;
+      enabled.title = '启用规则';
+      const up = document.createElement('button');
+      up.type = 'button';
+      up.textContent = '↑';
+      up.title = '提高优先级';
+      const down = document.createElement('button');
+      down.type = 'button';
+      down.textContent = '↓';
+      down.title = '降低优先级';
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '删';
+      word.addEventListener('change', () => {
+        const value = word.value.trim();
+        if (!value) {
+          keywordRules = keywordRules.filter((r) => r.id !== rule.id);
+          saveKeywordRules();
+          renderKeywords();
+        } else if (!keywordRules.some((r) => r.id !== rule.id && r.keyword.toLowerCase() === value.toLowerCase())) {
+          rule.keyword = value;
+          saveKeywordRules();
+          applyMarks();
+        } else {
+          word.value = rule.keyword;
+        }
+      });
+      select.addEventListener('change', () => { rule.category = select.value; rule.effect = select.value; saveKeywordRules(); applyMarks(); });
+      enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
+      up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
+      down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
+      del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
+      row.append(word, select, enabled, up, down, del);
+      box.append(row);
+    });
   }
 
   function uniqueId(label, exists) {
@@ -782,33 +1212,60 @@
     cats.forEach((c) => {
       const row = document.createElement('div');
       row.className = 'ld-tle-panel__cat';
-      const color = document.createElement('input');
-      color.type = 'color';
-      color.value = /^#([0-9a-f]{6})$/i.test(c.color) ? c.color : '#0969da';
       const label = document.createElement('input');
       label.type = 'text';
       label.value = c.label;
       const effect = document.createElement('select');
-      effect.innerHTML = '<option value="normal">普通</option><option value="tint">高亮</option><option value="dim">弱化</option>';
-      effect.value = c.effect;
+      effects.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = item.label;
+      option.selected = item.id === c.effectId;
+        effect.append(option);
+      });
       const del = document.createElement('button');
       del.type = 'button';
       del.textContent = '删';
-      color.addEventListener('change', () => updateCategory(c.id, { color: color.value }));
-      label.addEventListener('change', () => updateCategory(c.id, { label: label.value }));
-      effect.addEventListener('change', () => updateCategory(c.id, { effect: effect.value }));
+      label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
+      effect.addEventListener('change', () => updateGroup(c.id, { effectId: effect.value }));
       del.addEventListener('click', () => removeCategory(c.id));
-      row.append(color, label, effect, del);
+      row.append(label, effect, del);
       box.append(row);
     });
+  }
+
+  function updateEffect(id, patch) {
+    const effect = getEffect(id);
+    if (!effect || effect.builtin) return;
+    if (patch.label != null && String(patch.label).trim()) effect.label = String(patch.label).trim();
+    if (patch.color && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color)) effect.color = patch.color;
+    if (patch.mode && ['normal', 'tint', 'dim'].includes(patch.mode)) effect.mode = patch.mode;
+    if (patch.kind && ['none', 'color', 'fade', 'strike', 'badge'].includes(patch.kind)) {
+      effect.kind = patch.kind;
+      effect.mode = patch.kind === 'fade' ? 'dim' : 'normal';
+    }
+    if (patch.priority != null) effect.priority = Math.max(0, Number(patch.priority) || 0);
+    const cat = getCat(id);
+      if (cat) {
+        cat.label = effect.label;
+        cat.color = effect.color;
+        cat.effect = effect.mode;
+        cat.effectId = effect.id;
+    }
+    saveEffects();
+    saveCats();
+    updateMarkStyles();
+    fillCatSelects();
+    renderCats();
+    applyMarks();
   }
 
   function runImport(mode) {
     const ta = panelEl.querySelector('.ld-tle-panel__json');
     try {
-      const { parsed, importedCats, importedTags } = parseImport(ta.value);
+      const { parsed, importedEffects, importedCats, importedTags, importedRules } = parseImport(ta.value);
       if (!parsed.length) { showPanelMsg('没有可导入的标记'); return; }
-      const r = mergeImported(parsed, importedCats, importedTags, mode);
+      const r = mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode);
       renderPanelList();
       showPanelMsg(`新增 ${r.added}，更新 ${r.updated}，跳过 ${r.skipped}`);
     } catch (e) {
@@ -824,11 +1281,14 @@
   function renderPanelList() {
     if (!panelEl) return;
     const q = (panelEl.querySelector('.ld-tle-panel__q').value || '').trim().toLowerCase();
-    const filter = panelEl.querySelector('.ld-tle-panel__filter').value;
+      const filter = panelEl.querySelector('.ld-tle-panel__filter').value;
     const list = panelEl.querySelector('.ld-tle-panel__list');
+    panelEl.querySelector('.ld-tle-panel__stat-users').textContent = Object.keys(marks).length;
+    panelEl.querySelector('.ld-tle-panel__stat-cats').textContent = effects.length;
+    panelEl.querySelector('.ld-tle-panel__stat-tags').textContent = tags.length;
     const entries = Object.entries(marks)
       .filter(([user, info]) => {
-        if (filter && info.level !== filter) return false;
+        if (filter && (info.effect || info.level) !== filter) return false;
         if (!q) return true;
         return user.includes(q) || (info.note || '').toLowerCase().includes(q);
       })
@@ -850,11 +1310,11 @@
         <button type="button" data-act="del">删</button>
       `;
       const sel = row.querySelector('select');
-      cats.forEach((m) => {
+      effects.forEach((m) => {
         const opt = document.createElement('option');
         opt.value = m.id;
         opt.textContent = m.label;
-        if (m.id === info.level) opt.selected = true;
+        if (m.id === (info.effect || info.level)) opt.selected = true;
         sel.append(opt);
       });
       const note = row.querySelector('input');
@@ -874,7 +1334,7 @@
         tagButton.dataset.tag = tag.id;
         tagBox.append(tagButton);
       });
-      sel.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+      sel.addEventListener('change', () => setMark(user, sel.value, note.value, { effect: sel.value, tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
       note.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
       row.querySelector('[data-act="del"]').addEventListener('click', () => {
         setMark(user, null);
@@ -1426,19 +1886,19 @@
         right: 18px;
         bottom: 58px;
         z-index: 99991;
-        width: min(520px, calc(100vw - 24px));
-        max-height: min(78vh, 760px);
+        width: min(560px, calc(100vw - 24px));
+        max-height: min(82vh, 800px);
         overflow: auto;
-        padding: 16px;
+        padding: 18px;
         border: 1px solid #d8dee4;
-        border-radius: 12px;
+        border-radius: 14px;
         background: #fff;
         color: #24292f;
         box-shadow: 0 16px 48px rgba(31,35,40,.2);
         font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
       }
       .ld-tle-panel.is-open { display: block; }
-      .ld-tle-panel__bar { position: sticky; top: -16px; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 0 12px; margin-bottom: 0; border-bottom: 1px solid #eaeef2; background: #fff; }
+      .ld-tle-panel__bar { position: sticky; top: -18px; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 0 13px; margin-bottom: 0; border-bottom: 1px solid #eaeef2; background: #fff; }
       .ld-tle-panel__bar strong { display: block; font-size: 16px; letter-spacing: -.01em; }
       .ld-tle-panel__subtitle { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
       .ld-tle-panel__bar button { padding: 5px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
@@ -1446,19 +1906,28 @@
       .ld-tle-panel__nav button { flex: 1; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #57606a; font-weight: 600; cursor: pointer; }
       .ld-tle-panel__nav button.is-active { border-color: #0969da; color: #0969da; }
       .ld-tle-panel__count { display: inline-flex; min-width: 20px; justify-content: center; margin-left: 4px; padding: 1px 5px; border-radius: 999px; background: #eef2f6; color: #57606a; font-size: 11px; }
+      .ld-tle-panel__overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+      .ld-tle-panel__stat { padding: 10px 12px; border: 1px solid #e1e6eb; border-radius: 9px; background: #f8fafc; }
+      .ld-tle-panel__stat strong { display: block; color: #24292f; font-size: 19px; line-height: 1.1; }
+      .ld-tle-panel__stat span { display: block; margin-top: 4px; color: #8b949e; font-size: 11px; }
       .ld-tle-panel__pane { display: none; padding-top: 14px; }
       .ld-tle-panel__pane.is-active { display: block; }
       .ld-tle-panel__tools, .ld-tle-panel__btns, .ld-tle-panel__add, .ld-tle-panel__cat-add, .ld-tle-panel__tag-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-      .ld-tle-panel__card { padding: 10px; border: 1px solid #e1e6eb; border-radius: 8px; background: #f8fafc; }
+      .ld-tle-panel__card { padding: 12px; border: 1px solid #e1e6eb; border-radius: 9px; background: #f8fafc; box-shadow: 0 1px 2px rgba(31,35,40,.04); }
       .ld-tle-panel__section-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
       .ld-tle-panel__section-head strong { display: block; font-size: 13px; }
       .ld-tle-panel__section-head span { display: block; margin-top: 2px; color: #8b949e; font-size: 11px; }
       .ld-tle-panel__add .ld-tle-panel__user, .ld-tle-panel__cat-add .ld-tle-panel__cat-label, .ld-tle-panel__tag-add .ld-tle-panel__tag-label { flex: 1 1 140px; padding: 7px 10px; }
       .ld-tle-panel__sec { padding: 9px 10px 7px; margin: 14px 0 8px; border-bottom: 1px solid #eaeef2; color: #24292f; font-size: 12px; font-weight: 700; }
-      .ld-tle-panel__cats, .ld-tle-panel__tags { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-      .ld-tle-panel__cat { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px 38px; gap: 7px; align-items: center; padding: 5px 0; }
+      .ld-tle-panel__cats, .ld-tle-panel__tags { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
+      .ld-tle-panel__effects { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid #eaeef2; border-radius: 9px; background: #fff; }
+      .ld-tle-panel__effect-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 82px 64px 28px 28px 38px; gap: 7px; align-items: center; padding: 5px 0; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__effect-row:last-child { border-bottom: 0; }
+      .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) 180px 38px; gap: 7px; align-items: center; padding: 5px 0; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
+      .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
       .ld-tle-panel__cat input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+      .ld-tle-panel__effect-row input[type="color"] { width: 30px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
       .ld-tle-panel__q, .ld-tle-panel__filter, .ld-tle-panel__json, .ld-tle-panel button, .ld-tle-panel select, .ld-tle-panel input {
         font: inherit;
         border: 1px solid #d0d7de;
@@ -1473,12 +1942,15 @@
       .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover, .ld-tle-panel__tag-add button:hover { background: #0757b8 !important; }
       .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
       .ld-tle-panel__list { max-height: 390px; overflow: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
-      .ld-tle-panel__row { display: grid; grid-template-columns: minmax(88px, 1fr) 92px minmax(100px, 1.5fr) minmax(90px, 1fr) 38px; gap: 7px; align-items: center; padding: 7px 0; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__row { display: grid; grid-template-columns: minmax(88px, 1fr) 92px minmax(100px, 1.5fr) minmax(90px, 1fr) 38px; gap: 7px; align-items: center; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__row:hover { border-radius: 6px; background: #f8fafc; }
       .ld-tle-panel__row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
-      .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 120px 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
+      .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__btns button, .ld-tle-panel__row button { padding: 6px 9px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
       .ld-tle-panel__btns button:first-child { border-color: #0969da; color: #0969da; font-weight: 700; }
@@ -1489,8 +1961,11 @@
       @media (max-width: 620px) {
         .ld-tle-panel { right: 10px; bottom: 54px; width: calc(100vw - 20px); padding: 12px; }
         .ld-tle-panel__bar { top: -12px; }
+        .ld-tle-panel__overview { gap: 5px; }
+        .ld-tle-panel__stat { padding: 8px; }
         .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
         .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
+        .ld-tle-panel__keyword-row { grid-template-columns: 1fr 82px 28px 28px 28px 34px; gap: 4px; }
       }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
@@ -1533,8 +2008,13 @@
         .ld-tle-panel__nav button { color: #8b949e; }
         .ld-tle-panel__nav button.is-active { color: #58a6ff; border-color: #58a6ff; }
         .ld-tle-panel__card { border-color: #30363d; background: #0d1117; }
+        .ld-tle-panel__stat, .ld-tle-panel__cats, .ld-tle-panel__tags { border-color: #30363d; background: #0d1117; }
+        .ld-tle-panel__stat strong { color: #f0f6fc; }
         .ld-tle-panel__section-head span, .ld-tle-panel__subtitle { color: #8b949e; }
         .ld-tle-panel__list { border-color: #30363d; }
+        .ld-tle-panel__row { border-color: #30363d; }
+        .ld-tle-panel__row:hover { background: #21262d; }
+        .ld-tle-panel__keywords, .ld-tle-panel__keyword-row { border-color: #30363d; }
         .ld-tle-panel__bar button, .ld-tle-panel__btns button, .ld-tle-panel__row button { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
         .ld-tle-panel__sec, .ld-tle-panel__btns { border-color: #30363d; }
       }
@@ -1562,24 +2042,27 @@
       el.id = MARK_STYLE_ID;
       document.head.append(el);
     }
-    el.textContent = cats.map((c) => {
-      const [r, g, b] = hexToRgb(c.color);
-      const fg = contrastColor(c.color);
-       const dim = c.effect === 'dim';
-       const tint = c.effect === 'tint';
+    el.textContent = effects.map((effect) => {
+      const [r, g, b] = hexToRgb(effect.color);
+      const fg = contrastColor(effect.color);
+      const dim = effect.kind === 'fade' || effect.mode === 'dim';
+      const tint = effect.kind === 'color' && effect.mode === 'tint';
+      const colorLine = effect.kind === 'color' ? `box-shadow: inset 3px 0 0 ${effect.color} !important;` : '';
+      const strike = effect.kind === 'strike' ? 'text-decoration: line-through !important; text-decoration-color: currentColor !important;' : '';
       return `
-        tr.${MARK_CLASS}--${c.id} td {
-          opacity: ${dim ? '.28' : '1'} !important;
-          filter: ${dim ? 'grayscale(1)' : 'none'} !important;
-          text-decoration: none !important;
-           background: rgba(${r},${g},${b},${dim || tint ? (dim ? '.12' : '.14') : '0'}) !important;
+        tr.${EFFECT_CLASS}--${effect.id} td {
+          ${dim ? 'opacity: .28 !important; filter: grayscale(1) !important;' : ''}
+          ${tint ? `background: rgba(${r},${g},${b},.14) !important;` : ''}
+          ${strike}
         }
-        tr.${MARK_CLASS}--${c.id} td:first-child,
-        tr.${MARK_CLASS}--${c.id} td.main-link { box-shadow: inset 3px 0 0 ${c.color} !important; }
-        tr.${MARK_CLASS}--${c.id} .raw-topic-link { text-decoration: none !important; }
-        tr.${MARK_CLASS}--${c.id}:hover td { opacity: ${dim ? '.75' : '1'} !important; filter: ${dim ? 'grayscale(.4)' : 'none'} !important; }
-        .${MARK_BADGE}--cat-${c.id} { color: ${fg}; background: ${c.color}; }
-        .ld-tle-picker__lv--${c.id}.is-on { color: ${fg}; background: ${c.color}; border-color: ${c.color}; }
+        tr.${EFFECT_CLASS}--${effect.id} td:first-child,
+        tr.${EFFECT_CLASS}--${effect.id} td.main-link { ${colorLine} }
+        tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link { ${strike} }
+        tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link::after {
+          ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
+        }
+        tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? 'opacity: .75 !important; filter: grayscale(.4) !important;' : ''} }
+        .${MARK_BADGE}--effect-${effect.id} { color: ${fg}; background: ${effect.color}; }
       `;
     }).concat(tags.map((t) => {
       const fg = contrastColor(t.color);
