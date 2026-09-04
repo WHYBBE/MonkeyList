@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.29.0
+// @version      0.31.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -66,7 +66,7 @@
     'lottery-dim': 'fade-light',
     'stale-dim': 'fade-light',
   };
-  const EFFECT_LIBRARY_IDS = new Set(['left-highlight', 'tag-highlight', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic', 'lonely']);
+  const EFFECT_LIBRARY_IDS = new Set(['left-highlight', 'tag-highlight', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic']);
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
@@ -391,8 +391,8 @@
 
   function reusableEffectForRow(row) {
     const result = [];
-    if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('fade-light'));
-    if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('fade-light'));
+    if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
+    if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
     if (row.classList.contains(STALE_CLASS)) result.push(getEffect('fade-light'));
     if (row.classList.contains(LONELY_CLASS)) result.push(getEffect('lonely'));
     if (row.querySelector('.' + WELFARE_BADGE_CLASS)) result.push(getEffect('welfare'));
@@ -898,7 +898,7 @@
     const box = panelEl.querySelector('.ld-tle-panel__builtin');
     if (!box) return;
     box.innerHTML = '';
-    DEFAULT_EFFECTS.forEach((effect) => {
+    DEFAULT_EFFECTS.filter((effect) => !EFFECT_LIBRARY_IDS.has(effect.id)).forEach((effect) => {
       const row = document.createElement('label');
       row.className = 'ld-tle-panel__builtin-row';
        const enabled = document.createElement('input');
