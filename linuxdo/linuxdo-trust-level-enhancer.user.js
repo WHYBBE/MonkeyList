@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.31.0
+// @version      0.35.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -395,7 +395,16 @@
     if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
     if (row.classList.contains(STALE_CLASS)) result.push(getEffect('fade-light'));
     if (row.classList.contains(LONELY_CLASS)) result.push(getEffect('lonely'));
-    if (row.querySelector('.' + WELFARE_BADGE_CLASS)) result.push(getEffect('welfare'));
+      if (row.querySelector('.' + WELFARE_BADGE_CLASS)) {
+        const welfare = getEffect('welfare');
+        const tagHighlight = getEffect('tag-highlight');
+        if (welfare?.enabled !== false && tagHighlight) result.push({ ...tagHighlight, color: welfare.color, welfareOnly: true });
+    }
+    const categoryText = row.querySelector('.badge-category__name')?.textContent || '';
+    if (/富可敌国/.test(categoryText)) {
+      const rich = getEffect('rich');
+      if (rich?.enabled !== false) result.push(getEffect('fade-deep'), getEffect('strike'));
+    }
     const levelClass = [...row.querySelectorAll('td.main-link')].flatMap((td) => [...td.classList]).find((name) => /^ld-tle-row--[1-4]$/.test(name));
     if (levelClass) result.push(getEffect(levelClass.replace('ld-tle-row--', 'lv')));
     return result.filter(Boolean);
@@ -406,11 +415,13 @@
     markClassList(row);
     row.style.removeProperty('--ld-tle-effect-color');
     row.style.removeProperty('--ld-tle-tag-color');
+    row.classList.remove('ld-tle-welfare-only');
     const seen = new Set();
     effectsToApply.filter((effect) => effect && effect.enabled !== false).sort((a, b) => (b.priority || 0) - (a.priority || 0)).forEach((effect) => {
       if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) row.style.setProperty('--ld-tle-effect-color', effect.color);
       if (effect.kind === 'tag') {
         row.classList.add(`${EFFECT_CLASS}--tag-highlight`);
+        if (effect.welfareOnly) row.classList.add('ld-tle-welfare-only');
         if (!row.style.getPropertyValue('--ld-tle-tag-color')) row.style.setProperty('--ld-tle-tag-color', effect.color);
       }
       if (!seen.has(effect.id)) {
@@ -1591,11 +1602,6 @@
       .${CHIP_CLASS}--2 { color: #fff; background: #1a7f37; }
       .${CHIP_CLASS}--3 { color: #24292f; background: #d4a72c; }
       .${CHIP_CLASS}--4 { color: #fff; background: #8250df; }
-      .${WELFARE_BADGE_CLASS} {
-        box-shadow: 0 0 0 2px rgba(228,87,53,.55), 0 2px 6px rgba(228,87,53,.3) !important;
-        background: rgba(228,87,53,.14) !important;
-        font-weight: 700 !important;
-      }
       td.${ROW_CLASS} { --ld-tle-lv: transparent; box-shadow: inset 3px 0 0 0 var(--ld-tle-lv) !important; }
       td.${ROW_CLASS}--0 { --ld-tle-lv: #8a9199; }
       td.${ROW_CLASS}--1 { --ld-tle-lv: #0969da; }
@@ -1613,44 +1619,6 @@
         opacity: .92;
         filter: none;
       }
-      tr.${PROMO_CLASS} td {
-        opacity: .38;
-        filter: grayscale(.7);
-        background: rgba(178,186,197,.08);
-      }
-      tr.${PROMO_CLASS} td:first-child {
-        box-shadow: inset 3px 0 0 #9aa4af !important;
-      }
-      tr.${PROMO_CLASS} .raw-topic-link {
-        text-decoration: line-through;
-        text-decoration-color: rgba(110,118,129,.6);
-        text-decoration-thickness: 1.5px;
-      }
-      tr.${PROMO_CLASS}:hover td {
-        opacity: .88;
-        filter: none;
-        background: transparent;
-      }
-      tr.${PROMO_CLASS}:hover .raw-topic-link { text-decoration: none; }
-      tr.${LOTTERY_CLASS} td {
-        opacity: .5;
-        filter: grayscale(.5);
-        background: rgba(130,80,223,.06);
-      }
-      tr.${LOTTERY_CLASS} td:first-child {
-        box-shadow: inset 3px 0 0 #8250df !important;
-      }
-      tr.${LOTTERY_CLASS} .raw-topic-link {
-        text-decoration: line-through;
-        text-decoration-color: rgba(130,80,223,.5);
-        text-decoration-thickness: 1.5px;
-      }
-      tr.${LOTTERY_CLASS}:hover td {
-        opacity: .88;
-        filter: none;
-        background: transparent;
-      }
-      tr.${LOTTERY_CLASS}:hover .raw-topic-link { text-decoration: none; }
       img.ld-tle-op {
         box-shadow: 0 0 0 2px #8a9199 !important;
         transition: box-shadow .15s ease;
@@ -1683,21 +1651,6 @@
       article.${OP_POST_CLASS} {
         box-shadow: inset 2px 0 0 #8250df !important;
         padding-left: 6px !important;
-      }
-      tr.${LONELY_CLASS} td.main-link:not(.${ROW_CLASS}) {
-        box-shadow: inset 3px 0 0 0 #bf8700 !important;
-      }
-      tr.${LONELY_CLASS} .raw-topic-link::after {
-        content: '待回复';
-        display: inline-flex;
-        align-items: center;
-        margin-left: 6px;
-        padding: 0 6px;
-        border-radius: 3px;
-        color: #fff;
-        background: #9a6700;
-        font: 600 10px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        vertical-align: middle;
       }
       .${JUMP_CLASS} {
         margin-right: 4px;
@@ -1947,10 +1900,6 @@
         .${CHIP_CLASS}--2 { color: #f0f6fc; background: #2ea043; }
         .${CHIP_CLASS}--3 { color: #3d2e00; background: #e3b341; }
         .${CHIP_CLASS}--4 { color: #f0f6fc; background: #8957e5; }
-        .${WELFARE_BADGE_CLASS} {
-          box-shadow: 0 0 0 2px rgba(228,87,53,.6), 0 2px 6px rgba(0,0,0,.4) !important;
-          background: rgba(228,87,53,.18) !important;
-        }
         td.${ROW_CLASS}--0 { --ld-tle-lv: #6e7681; }
         td.${ROW_CLASS}--1 { --ld-tle-lv: #1f6feb; }
         td.${ROW_CLASS}--2 { --ld-tle-lv: #2ea043; }
@@ -1960,10 +1909,6 @@
         .${TIME_CLASS}--fresh { color: #f0f6fc; background: #2ea043; border-color: #2ea043; }
         .${TIME_CLASS}--week { color: #79c0ff; background: #0d2847; border-color: #1f6feb; }
         article.${OP_POST_CLASS} .post__body > .topic-meta-data .names .first::after { background: #8957e5; }
-        tr.${LONELY_CLASS} td.main-link:not(.${ROW_CLASS}) {
-          box-shadow: inset 3px 0 0 0 #9e6a03 !important;
-        }
-        tr.${LONELY_CLASS} .raw-topic-link::after { background: #9e6a03; }
         img.ld-tle-op { box-shadow: 0 0 0 2px #6e7681 !important; }
         img.ld-tle-op.ld-tle-op--1 { box-shadow: 0 0 0 2px #1f6feb !important; }
         img.ld-tle-op.ld-tle-op--2 { box-shadow: 0 0 0 2px #2ea043 !important; }
@@ -2027,16 +1972,15 @@
        const mosaic = effect.kind === 'mosaic' ? 'filter: blur(5px) !important;' : '';
       return `
         tr.${EFFECT_CLASS}--${effect.id} td {
-          ${dim ? `opacity: ${opacity} !important; filter: grayscale(.75) !important;` : ''}
-          ${tint ? `background: rgba(${r},${g},${b},.14) !important;` : ''}
-           ${strike}
+           ${dim ? `opacity: ${opacity} !important; filter: grayscale(.75) !important;` : ''}
+           ${tint ? `background: rgba(${r},${g},${b},.14) !important;` : ''}
            ${mosaic}
         }
         tr.${EFFECT_CLASS}--${effect.id} td:first-child,
         tr.${EFFECT_CLASS}--${effect.id} td.main-link { ${colorLine} }
-         tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link { ${strike} ${mosaic} }
-         tr.${EFFECT_CLASS}--tag-highlight .discourse-tag,
-         tr.${EFFECT_CLASS}--tag-highlight .badge-category { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
+         tr.${EFFECT_CLASS}--${effect.id} .link-top-line { ${strike} ${mosaic} }
+         tr.${EFFECT_CLASS}--tag-highlight:not(.ld-tle-welfare-only) .discourse-tag { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
+         tr.${EFFECT_CLASS}--tag-highlight.ld-tle-welfare-only .badge-category { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
         tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
         }
