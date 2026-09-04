@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.27.0
+// @version      0.28.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -51,15 +51,21 @@
     { id: 'lv4', label: 'Lv4颜色', color: '#8250df', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv4 左侧颜色线' },
     { id: 'rich', label: '富可敌国颜色', color: '#d4a72c', mode: 'normal', kind: 'color', priority: 30, hint: '金色左侧颜色线' },
     { id: 'welfare', label: '福利羊毛颜色', color: '#e45735', mode: 'normal', kind: 'color', priority: 30, hint: '福利内容颜色线' },
-    { id: 'fade1', label: '淡化等级 1', color: '#9aa4af', mode: 'dim', kind: 'fade', priority: 20, hint: '降低透明度和饱和度' },
-    { id: 'fade2', label: '淡化等级 2 / 删除线', color: '#6e7681', mode: 'normal', kind: 'strike', priority: 20, hint: '增加删除线效果' },
-    { id: 'promo-dim', label: '推广淡化', color: '#9aa4af', mode: 'dim', kind: 'fade', priority: 20, hint: '原推广淡化效果' },
-    { id: 'lottery-dim', label: '抽奖淡化', color: '#8250df', mode: 'dim', kind: 'fade', priority: 20, hint: '原抽奖淡化效果' },
-    { id: 'stale-dim', label: '过期淡化', color: '#6e7681', mode: 'dim', kind: 'fade', opacity: 0.58, priority: 10, hint: '降低过期主题存在感，但保持可读' },
+    { id: 'fade-light', label: '淡化（浅）', color: '#9aa4af', mode: 'dim', kind: 'fade', opacity: 0.58, priority: 20, hint: '轻度降低透明度和饱和度' },
+    { id: 'fade-deep', label: '淡化（深）', color: '#6e7681', mode: 'dim', kind: 'fade', opacity: 0.28, priority: 20, hint: '明显降低透明度和饱和度' },
+    { id: 'strike', label: '删除线', color: '#6e7681', mode: 'normal', kind: 'strike', priority: 20, hint: '为内容增加删除线' },
+    { id: 'mosaic', label: '马赛克模糊', color: '#6e7681', mode: 'normal', kind: 'mosaic', priority: 20, hint: '模糊内容，悬停时恢复查看' },
     { id: 'lonely', label: '待回复', color: '#9a6700', mode: 'normal', kind: 'badge', priority: 20, hint: '标记待回复主题' },
   ].map((effect) => ({ ...effect, builtin: true, enabled: true }));
   const BUILTIN_EFFECT_IDS = new Set(DEFAULT_EFFECTS.map((effect) => effect.id));
-  const EFFECT_LIBRARY_IDS = new Set(DEFAULT_EFFECTS.filter((effect) => effect.id === 'color-mark' || effect.kind !== 'color' || effect.id === 'normal').map((effect) => effect.id));
+  const LEGACY_EFFECT_ID_MAP = {
+    fade1: 'fade-light',
+    fade2: 'strike',
+    'promo-dim': 'fade-light',
+    'lottery-dim': 'fade-light',
+    'stale-dim': 'fade-light',
+  };
+  const EFFECT_LIBRARY_IDS = new Set(['color-mark', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic', 'lonely']);
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
@@ -67,7 +73,7 @@
   function libraryEffectIds(ids) {
     return [...new Set((Array.isArray(ids) ? ids : [ids]).map(String).map((id) => {
       if (['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id)) return 'color-mark';
-      return id;
+      return LEGACY_EFFECT_ID_MAP[id] || id;
     }).filter((id) => EFFECT_LIBRARY_IDS.has(id)))];
   }
 
@@ -82,9 +88,8 @@
   let panelEl = null;
 
   cats.forEach((group) => {
-    group.effectIds = (group.effectIds || [group.effectId]).filter((id) => getEffect(id));
-    if (group.effectIds.some((id) => ['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id))) group.effectIds = ['color-mark', ...group.effectIds.filter((id) => !['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id))];
-    if (!group.effectIds.length) group.effectIds = [effects[0].id];
+    group.effectIds = libraryEffectIds(group.effectIds || [group.effectId]).filter((id) => getEffect(id));
+    if (!group.effectIds.length) group.effectIds = ['color-mark'];
   });
 
   function normalizeCat(raw) {
@@ -125,7 +130,7 @@
     if (!id || !label) return null;
     return {
       id, label, color, mode,
-      kind: ['none', 'color', 'fade', 'strike', 'badge'].includes(raw.kind) ? raw.kind : 'color',
+      kind: ['none', 'color', 'fade', 'strike', 'mosaic', 'badge'].includes(raw.kind) ? raw.kind : 'color',
       priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0,
       opacity: Number.isFinite(Number(raw.opacity)) ? Math.max(0.1, Math.min(1, Number(raw.opacity))) : undefined,
       hint: String(raw.hint || '').trim(),
@@ -273,7 +278,7 @@
             note: (v && v.note) || '',
             tags: Array.isArray(v && v.tags) ? v.tags.map(String) : [],
             effect: (v && v.effect) || level,
-            effects: Array.isArray(v && v.effects) ? v.effects.map(String) : [(v && v.effect) || level],
+            effects: libraryEffectIds(Array.isArray(v && v.effects) ? v.effects : [(v && v.effect) || level]),
             at: (v && v.at) || Date.now(),
           };
         }
@@ -385,9 +390,9 @@
 
   function reusableEffectForRow(row) {
     const result = [];
-    if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('promo-dim'));
-    if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('lottery-dim'));
-    if (row.classList.contains(STALE_CLASS)) result.push(getEffect('stale-dim'));
+    if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('fade-light'));
+    if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('fade-light'));
+    if (row.classList.contains(STALE_CLASS)) result.push(getEffect('fade-light'));
     if (row.classList.contains(LONELY_CLASS)) result.push(getEffect('lonely'));
     if (row.querySelector('.' + WELFARE_BADGE_CLASS)) result.push(getEffect('welfare'));
     const levelClass = [...row.querySelectorAll('td.main-link')].flatMap((td) => [...td.classList]).find((name) => /^ld-tle-row--[1-4]$/.test(name));
@@ -1004,7 +1009,7 @@
       const label = document.createElement('strong');
       label.textContent = effect.label;
       const kind = document.createElement('span');
-      kind.textContent = effect.kind === 'color' ? '颜色' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'badge' ? '提示标记' : '无';
+       kind.textContent = effect.kind === 'color' ? '颜色' : effect.kind === 'fade' ? '淡化' : effect.kind === 'strike' ? '删除线' : effect.kind === 'mosaic' ? '马赛克模糊' : effect.kind === 'badge' ? '提示标记' : '无';
       const hint = document.createElement('small');
       hint.textContent = effect.hint;
       row.append(swatch, label, kind, hint);
@@ -2009,23 +2014,25 @@
       const [r, g, b] = hexToRgb(effect.color);
       const fg = contrastColor(effect.color);
       const dim = effect.kind === 'fade' || effect.mode === 'dim';
-      const opacity = effect.opacity || 0.28;
+       const opacity = effect.opacity || 0.28;
       const tint = effect.kind === 'color' && effect.mode === 'tint';
        const colorLine = effect.kind === 'color' ? `box-shadow: inset 3px 0 0 var(--ld-tle-effect-color, ${effect.color}) !important;` : '';
-      const strike = effect.kind === 'strike' ? 'text-decoration: line-through !important; text-decoration-color: currentColor !important;' : '';
+       const strike = effect.kind === 'strike' ? 'text-decoration: line-through !important; text-decoration-color: currentColor !important;' : '';
+       const mosaic = effect.kind === 'mosaic' ? 'filter: blur(5px) !important;' : '';
       return `
         tr.${EFFECT_CLASS}--${effect.id} td {
           ${dim ? `opacity: ${opacity} !important; filter: grayscale(.75) !important;` : ''}
           ${tint ? `background: rgba(${r},${g},${b},.14) !important;` : ''}
-          ${strike}
+           ${strike}
+           ${mosaic}
         }
         tr.${EFFECT_CLASS}--${effect.id} td:first-child,
         tr.${EFFECT_CLASS}--${effect.id} td.main-link { ${colorLine} }
-        tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link { ${strike} }
+         tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link { ${strike} ${mosaic} }
         tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
         }
-        tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? `opacity: ${Math.min(1, opacity + 0.25)} !important; filter: grayscale(.35) !important;` : ''} }
+         tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? `opacity: ${Math.min(1, opacity + 0.25)} !important; filter: grayscale(.35) !important;` : mosaic ? 'filter: none !important;' : ''} }
         .${MARK_BADGE}--effect-${effect.id} { color: ${fg}; background: ${effect.color}; }
       `;
     }).concat(tags.map((t) => {
