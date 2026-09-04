@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.25.0
+// @version      0.27.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -219,6 +219,7 @@
         id: String(r.id || `rule-${index + 1}`),
         keyword: String(r.keyword).trim(),
         effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
+        color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
         enabled: r.enabled !== false,
       })) : [];
     } catch (e) {
@@ -235,7 +236,7 @@
     const tagsText = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')].map((el) => el.textContent).join(' ');
     const haystack = `${title} ${tagsText}`.toLowerCase();
     const rule = keywordRules.find((r) => r.enabled && r.keyword && haystack.includes(r.keyword.toLowerCase()) && boundEffects(r.effectIds).length);
-    return rule ? { rule, effects: boundEffects(rule.effectIds) } : null;
+    return rule ? { rule, effects: boundEffects(rule.effectIds, rule.color) } : null;
   }
 
   function moveKeywordRule(id, direction) {
@@ -397,8 +398,10 @@
   // Shared effect layer: user marks and future rules can use the same topic-row behavior.
   function applyTopicEffects(row, effectsToApply) {
     markClassList(row);
+    row.style.removeProperty('--ld-tle-effect-color');
     const seen = new Set();
     effectsToApply.filter((effect) => effect && effect.enabled !== false).sort((a, b) => (b.priority || 0) - (a.priority || 0)).forEach((effect) => {
+      if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) row.style.setProperty('--ld-tle-effect-color', effect.color);
       if (!seen.has(effect.id)) {
         seen.add(effect.id);
         row.classList.add(`${EFFECT_CLASS}--${effect.id}`);
@@ -608,6 +611,7 @@
        id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
        keyword: String(r.keyword).trim(),
        effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
+       color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
        enabled: r.enabled !== false,
      })) : [];
     return { parsed, importedEffects, importedCats, importedTags, importedRules };
@@ -787,6 +791,7 @@
         <div class="ld-tle-panel__keyword-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__keyword" placeholder="关键词，例如：抽奖">
           <div class="ld-tle-panel__keyword-cat ld-tle-panel__effect-choices"></div>
+          <input type="color" class="ld-tle-panel__keyword-color" value="#0969da" title="颜色标记颜色">
           <button type="button" data-act="add-keyword">添加规则</button>
         </div>
       </section>
@@ -854,12 +859,13 @@
       const input = panelEl.querySelector('.ld-tle-panel__keyword');
       const keyword = input.value.trim();
        const effectIds = [...panelEl.querySelectorAll('.ld-tle-panel__keyword-cat input:checked')].map((input) => input.value);
+       const color = panelEl.querySelector('.ld-tle-panel__keyword-color').value;
        if (!keyword || !effectIds.length) { showPanelMsg('请输入关键词并选择效果'); return; }
       if (keywordRules.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase())) {
         showPanelMsg('关键词已存在');
         return;
       }
-       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, enabled: true });
+       keywordRules.push({ id: `rule-${Date.now()}`, keyword, effectIds, color, enabled: true });
       saveKeywordRules();
       input.value = '';
       renderKeywords();
@@ -884,7 +890,7 @@
     DEFAULT_EFFECTS.forEach((effect) => {
       const row = document.createElement('label');
       row.className = 'ld-tle-panel__builtin-row';
-      const enabled = document.createElement('input');
+       const enabled = document.createElement('input');
       enabled.type = 'checkbox';
       enabled.checked = getEffect(effect.id)?.enabled !== false;
       enabled.addEventListener('change', () => toggleEffect(effect.id, enabled.checked));
@@ -1072,11 +1078,16 @@
         }
       });
        select.addEventListener('change', () => { rule.effectIds = [...select.querySelectorAll('input:checked')].map((option) => option.value); saveKeywordRules(); applyMarks(); });
+       const color = document.createElement('input');
+       color.type = 'color';
+       color.value = rule.color || '#0969da';
+       color.title = '颜色标记颜色';
+       color.addEventListener('change', () => { rule.color = color.value; saveKeywordRules(); applyMarks(); });
       enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
       up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
       down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
       del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
-       row.append(word, select, enabled, up, down, del);
+       row.append(word, select, color, enabled, up, down, del);
       box.append(row);
     });
   }
@@ -1897,7 +1908,7 @@
       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
-      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) 32px 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
@@ -2000,7 +2011,7 @@
       const dim = effect.kind === 'fade' || effect.mode === 'dim';
       const opacity = effect.opacity || 0.28;
       const tint = effect.kind === 'color' && effect.mode === 'tint';
-      const colorLine = effect.kind === 'color' ? `box-shadow: inset 3px 0 0 ${effect.color} !important;` : '';
+       const colorLine = effect.kind === 'color' ? `box-shadow: inset 3px 0 0 var(--ld-tle-effect-color, ${effect.color}) !important;` : '';
       const strike = effect.kind === 'strike' ? 'text-decoration: line-through !important; text-decoration-color: currentColor !important;' : '';
       return `
         tr.${EFFECT_CLASS}--${effect.id} td {
