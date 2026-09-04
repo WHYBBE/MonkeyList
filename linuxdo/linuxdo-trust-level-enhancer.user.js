@@ -36,13 +36,14 @@
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
   const DEFAULT_CATS = [
-    { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], hint: '弱化显示' },
-    { id: 'caution', label: '注意', effectIds: ['rich'], hint: '黄色警示' },
-    { id: 'watch', label: '关注', effectIds: ['lv1'], hint: '蓝色高亮' },
-    { id: 'friend', label: '友好', effectIds: ['lv2'], hint: '绿色高亮' },
-    { id: 'vip', label: '重要', effectIds: ['rich'], hint: '金色强调' },
+    { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], color: '#6e7681', hint: '弱化显示' },
+    { id: 'caution', label: '注意', effectIds: ['color-mark'], color: '#d4a72c', hint: '黄色警示' },
+    { id: 'watch', label: '关注', effectIds: ['color-mark'], color: '#0969da', hint: '蓝色高亮' },
+    { id: 'friend', label: '友好', effectIds: ['color-mark'], color: '#1a7f37', hint: '绿色高亮' },
+    { id: 'vip', label: '重要', effectIds: ['color-mark'], color: '#d4a72c', hint: '金色强调' },
   ];
   const DEFAULT_EFFECTS = [
+    { id: 'color-mark', label: '颜色标记', color: '#0969da', mode: 'normal', kind: 'color', priority: 30, hint: '为标记添加自定义颜色' },
     { id: 'normal', label: '无额外效果', color: '#6e7681', mode: 'normal', kind: 'none', priority: 0, hint: '只显示标记' },
     { id: 'lv1', label: 'Lv1颜色', color: '#0969da', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv1 左侧颜色线' },
     { id: 'lv2', label: 'Lv2颜色', color: '#1a7f37', mode: 'normal', kind: 'color', priority: 10, hint: '沿用 Lv2 左侧颜色线' },
@@ -58,9 +59,17 @@
     { id: 'lonely', label: '待回复', color: '#9a6700', mode: 'normal', kind: 'badge', priority: 20, hint: '标记待回复主题' },
   ].map((effect) => ({ ...effect, builtin: true, enabled: true }));
   const BUILTIN_EFFECT_IDS = new Set(DEFAULT_EFFECTS.map((effect) => effect.id));
+  const EFFECT_LIBRARY_IDS = new Set(DEFAULT_EFFECTS.filter((effect) => effect.id === 'color-mark' || effect.kind !== 'color' || effect.id === 'normal').map((effect) => effect.id));
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
+
+  function libraryEffectIds(ids) {
+    return [...new Set((Array.isArray(ids) ? ids : [ids]).map(String).map((id) => {
+      if (['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id)) return 'color-mark';
+      return id;
+    }).filter((id) => EFFECT_LIBRARY_IDS.has(id)))];
+  }
 
   let opUserId = null;
   let cachedTopicId = null;
@@ -74,6 +83,7 @@
 
   cats.forEach((group) => {
     group.effectIds = (group.effectIds || [group.effectId]).filter((id) => getEffect(id));
+    if (group.effectIds.some((id) => ['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id))) group.effectIds = ['color-mark', ...group.effectIds.filter((id) => !['lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id))];
     if (!group.effectIds.length) group.effectIds = [effects[0].id];
   });
 
@@ -83,8 +93,9 @@
     const label = String(raw.label || raw.name || '').trim();
     const hint = String(raw.hint || '').trim();
     if (!id || !label) return null;
-    const effectIds = Array.isArray(raw.effectIds) ? raw.effectIds : [raw.effectId || raw.id];
-    return { id, label, effectIds: effectIds.map(String), hint };
+    const effectIds = libraryEffectIds(Array.isArray(raw.effectIds) ? raw.effectIds : [raw.effectId || raw.id]);
+    const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '';
+    return { id, label, effectIds: effectIds.map(String), color, hint };
   }
 
   function loadCats() {
@@ -157,13 +168,13 @@
     return boundEffects(cat.effectIds)[0] || null;
   }
 
-  function boundEffects(value) {
+  function boundEffects(value, colorOverride) {
     const ids = Array.isArray(value) ? value : [value];
     return ids.flatMap((id) => {
       const direct = getEffect(id);
-      if (direct) return [direct];
+      if (direct) return [colorOverride && direct.kind === 'color' ? { ...direct, color: colorOverride } : direct];
       const cat = getCat(id);
-      return cat ? boundEffects(cat.effectIds) : [];
+      return cat ? boundEffects(cat.effectIds, cat.color || colorOverride) : [];
     }).filter((effect) => effect && effect.enabled !== false);
   }
 
@@ -199,7 +210,7 @@
       return Array.isArray(raw) ? raw.filter((r) => r && r.keyword && (r.effectIds || r.effects || r.effect || r.category)).map((r, index) => ({
         id: String(r.id || `rule-${index + 1}`),
         keyword: String(r.keyword).trim(),
-        effectIds: (Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]).map(String),
+        effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
         enabled: r.enabled !== false,
       })) : [];
     } catch (e) {
@@ -586,7 +597,7 @@
     const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && (r.effectIds || r.effects || r.effect || r.category)).map((r) => ({
        id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
        keyword: String(r.keyword).trim(),
-       effectIds: (Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]).map(String),
+       effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
        enabled: r.enabled !== false,
      })) : [];
     return { parsed, importedEffects, importedCats, importedTags, importedRules };
@@ -712,9 +723,9 @@
       </div>
       <div class="ld-tle-panel__nav" role="tablist">
         <button type="button" class="is-active" data-pane="users">用户 <span class="ld-tle-panel__count"></span></button>
+        <button type="button" data-pane="effects">效果库</button>
         <button type="button" data-pane="builtin">内置规则</button>
         <button type="button" data-pane="groups">分组</button>
-        <button type="button" data-pane="effects">效果库</button>
         <button type="button" data-pane="keywords">关键词匹配</button>
         <button type="button" data-pane="data">数据</button>
       </div>
@@ -744,7 +755,8 @@
         <div class="ld-tle-panel__cats"></div>
         <div class="ld-tle-panel__cat-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__cat-label" placeholder="新分组名">
-          <select class="ld-tle-panel__cat-effect" multiple></select>
+          <div class="ld-tle-panel__cat-effect ld-tle-panel__effect-choices"></div>
+          <input type="color" class="ld-tle-panel__cat-color" value="#0969da" title="分组颜色">
           <button type="button" data-act="add-cat">添加分组</button>
         </div>
         <div class="ld-tle-panel__section-head"><div><strong>子标签</strong><span>只显示在用户名旁，可多选</span></div></div>
@@ -764,7 +776,7 @@
         <div class="ld-tle-panel__keywords"></div>
         <div class="ld-tle-panel__keyword-add ld-tle-panel__card">
           <input type="text" class="ld-tle-panel__keyword" placeholder="关键词，例如：抽奖">
-          <select class="ld-tle-panel__keyword-cat" multiple></select>
+          <div class="ld-tle-panel__keyword-cat ld-tle-panel__effect-choices"></div>
           <button type="button" data-act="add-keyword">添加规则</button>
         </div>
       </section>
@@ -813,8 +825,9 @@
     });
     panelEl.querySelector('[data-act="add-cat"]').addEventListener('click', () => {
       const label = (panelEl.querySelector('.ld-tle-panel__cat-label').value || '').trim();
-       const effectIds = [...panelEl.querySelector('.ld-tle-panel__cat-effect').selectedOptions].map((option) => option.value);
-       const cat = addCategory(label, effectIds);
+       const effectIds = [...panelEl.querySelectorAll('.ld-tle-panel__cat-effect input:checked')].map((input) => input.value);
+       const color = panelEl.querySelector('.ld-tle-panel__cat-color').value;
+       const cat = addCategory(label, effectIds, color);
       if (!cat) { showPanelMsg('效果名无效或已存在'); return; }
       panelEl.querySelector('.ld-tle-panel__cat-label').value = '';
       showPanelMsg(`已添加分类「${cat.label}」`);
@@ -830,7 +843,7 @@
     panelEl.querySelector('[data-act="add-keyword"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__keyword');
       const keyword = input.value.trim();
-       const effectIds = [...panelEl.querySelector('.ld-tle-panel__keyword-cat').selectedOptions].map((option) => option.value);
+       const effectIds = [...panelEl.querySelectorAll('.ld-tle-panel__keyword-cat input:checked')].map((input) => input.value);
        if (!keyword || !effectIds.length) { showPanelMsg('请输入关键词并选择效果'); return; }
       if (keywordRules.some((r) => r.keyword.toLowerCase() === keyword.toLowerCase())) {
         showPanelMsg('关键词已存在');
@@ -886,14 +899,15 @@
     const group = cats.find((cat) => cat.id === id);
     if (!group) return;
     if (patch.label != null && String(patch.label).trim()) group.label = String(patch.label).trim();
-    if (patch.effectIds) group.effectIds = patch.effectIds.filter((effectId) => getEffect(effectId));
+    if (patch.effectIds) group.effectIds = libraryEffectIds(patch.effectIds).filter((effectId) => getEffect(effectId));
+    if (patch.color && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(patch.color)) group.color = patch.color;
     saveCats();
     fillCatSelects();
     renderCats();
     applyMarks();
   }
 
-  function addCategory(label, effectIds) {
+  function addCategory(label, effectIds, color) {
     const name = String(label || '').trim();
     if (!name) return null;
     if (cats.some((c) => c.label === name)) return null;
@@ -903,8 +917,8 @@
       while (getCat(id + '-' + n)) n++;
       id = id + '-' + n;
     }
-    const ids = (Array.isArray(effectIds) ? effectIds : [effectIds]).filter((effectId) => getEffect(effectId));
-    const cat = normalizeCat({ id, label: name, effectIds: ids.length ? ids : [effects[0].id] });
+    const ids = libraryEffectIds(effectIds).filter((effectId) => getEffect(effectId));
+    const cat = normalizeCat({ id, label: name, color, effectIds: ids.length ? ids : ['color-mark'] });
     if (!cat) return null;
     cats.push(cat);
     saveCats();
@@ -939,12 +953,19 @@
       filter.append(a.cloneNode(true));
       addSel.append(a);
     });
-    effects.forEach((c) => {
+    effects.filter((c) => EFFECT_LIBRARY_IDS.has(c.id)).forEach((c) => {
       const a = document.createElement('option');
       a.value = c.id;
       a.textContent = c.label;
-      if (keywordSel) keywordSel.append(a.cloneNode(true));
-      if (groupSel) groupSel.append(a.cloneNode(true));
+      [keywordSel, groupSel].forEach((container) => {
+        if (!container) return;
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = c.id;
+        label.append(input, document.createTextNode(c.label));
+        container.append(label);
+      });
     });
     if ([...filter.options].some((o) => o.value === keepFilter)) filter.value = keepFilter;
   }
@@ -958,7 +979,7 @@
     const box = panelEl.querySelector('.ld-tle-panel__effects');
     if (!box) return;
     box.innerHTML = '';
-    effects.filter((effect) => isBuiltinEffect(effect.id)).forEach((effect) => {
+    effects.filter((effect) => EFFECT_LIBRARY_IDS.has(effect.id)).forEach((effect) => {
       const row = document.createElement('div');
       row.className = 'ld-tle-panel__effect-row';
       const swatch = document.createElement('span');
@@ -1000,16 +1021,17 @@
       const word = document.createElement('input');
       word.type = 'text';
       word.value = rule.keyword;
-       const select = document.createElement('select');
-       select.multiple = true;
-       select.size = Math.min(4, Math.max(2, effects.length));
-       effects.forEach((cat) => {
-        const option = document.createElement('option');
-        option.value = cat.id;
-        option.textContent = cat.label;
-         option.selected = (rule.effectIds || []).includes(cat.id);
-        select.append(option);
-      });
+       const select = document.createElement('div');
+       select.className = 'ld-tle-panel__effect-choices';
+       effects.filter((cat) => EFFECT_LIBRARY_IDS.has(cat.id)).forEach((cat) => {
+         const choice = document.createElement('label');
+         const option = document.createElement('input');
+         option.type = 'checkbox';
+         option.value = cat.id;
+         option.checked = (rule.effectIds || []).includes(cat.id);
+         choice.append(option, document.createTextNode(cat.label));
+         select.append(choice);
+       });
       const enabled = document.createElement('input');
       enabled.type = 'checkbox';
       enabled.checked = rule.enabled;
@@ -1039,7 +1061,7 @@
           word.value = rule.keyword;
         }
       });
-       select.addEventListener('change', () => { rule.effectIds = [...select.selectedOptions].map((option) => option.value); saveKeywordRules(); applyMarks(); });
+       select.addEventListener('change', () => { rule.effectIds = [...select.querySelectorAll('input:checked')].map((option) => option.value); saveKeywordRules(); applyMarks(); });
       enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
       up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
       down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
@@ -1137,23 +1159,29 @@
       const label = document.createElement('input');
       label.type = 'text';
       label.value = c.label;
-       const effect = document.createElement('select');
-       effect.multiple = true;
-       effect.size = Math.min(4, Math.max(2, effects.length));
-      effects.forEach((item) => {
-        const option = document.createElement('option');
-        option.value = item.id;
-        option.textContent = item.label;
-         option.selected = (c.effectIds || []).includes(item.id);
-        effect.append(option);
-      });
+       const effect = document.createElement('div');
+       effect.className = 'ld-tle-panel__effect-choices';
+       effects.filter((item) => EFFECT_LIBRARY_IDS.has(item.id)).forEach((item) => {
+         const choice = document.createElement('label');
+         const option = document.createElement('input');
+         option.type = 'checkbox';
+         option.value = item.id;
+         option.checked = (c.effectIds || []).includes(item.id);
+         choice.append(option, document.createTextNode(item.label));
+         effect.append(choice);
+       });
+       const color = document.createElement('input');
+       color.type = 'color';
+       color.value = c.color || (boundEffects(c.effectIds)[0] || {}).color || '#0969da';
+       color.title = '分组颜色';
       const del = document.createElement('button');
       del.type = 'button';
       del.textContent = '删';
       label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
-       effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.selectedOptions].map((option) => option.value) }));
+       effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.querySelectorAll('input:checked')].map((option) => option.value) }));
+       color.addEventListener('change', () => updateGroup(c.id, { color: color.value }));
       del.addEventListener('click', () => removeCategory(c.id));
-       row.append(label, effect, del);
+       row.append(label, effect, color, del);
       box.append(row);
     });
   }
@@ -1827,8 +1855,11 @@
       .ld-tle-panel__effect-row small, .ld-tle-panel__builtin-row small { color: #8b949e; }
       .ld-tle-panel__builtin-row { display: grid; grid-template-columns: 28px minmax(100px, 1fr) minmax(100px, 1.5fr); gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__builtin-row:last-child { border-bottom: 0; }
-      .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 76px; }
-      .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) 180px 38px; gap: 7px; align-items: center; padding: 5px 0; }
+      .ld-tle-panel__effect-choices { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+      .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
+      .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
+      .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
+      .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 2fr) 32px 38px; gap: 7px; align-items: center; padding: 7px 0; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
       .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
       .ld-tle-panel__cat input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
@@ -1842,7 +1873,10 @@
       }
       .ld-tle-panel__q { flex: 1; padding: 7px 10px; }
       .ld-tle-panel__tools select { min-width: 112px; padding: 7px 8px; }
-      .ld-tle-panel__add select, .ld-tle-panel__cat-add select { min-width: 82px; padding: 7px 8px; }
+      .ld-tle-panel__add select { min-width: 82px; padding: 7px 8px; }
+      .ld-tle-panel__cat-add { align-items: center; }
+      .ld-tle-panel__cat-add .ld-tle-panel__effect-choices { flex: 2 1 220px; }
+      .ld-tle-panel__cat-add .ld-tle-panel__cat-color { width: 32px; height: 30px; padding: 0; }
       .ld-tle-panel__add button, .ld-tle-panel__cat-add button, .ld-tle-panel__tag-add button { padding: 7px 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
       .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover, .ld-tle-panel__tag-add button:hover { background: #0757b8 !important; }
       .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
@@ -1853,7 +1887,7 @@
       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
-      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 120px 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
@@ -1868,9 +1902,12 @@
         .ld-tle-panel__bar { top: -12px; }
         .ld-tle-panel__overview { gap: 5px; }
         .ld-tle-panel__stat { padding: 8px; }
-        .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
-        .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
-        .ld-tle-panel__keyword-row { grid-template-columns: 1fr 82px 28px 28px 28px 34px; gap: 4px; }
+         .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
+         .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
+         .ld-tle-panel__cat { grid-template-columns: 1fr 32px 38px; }
+         .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
+         .ld-tle-panel__keyword-row { grid-template-columns: 1fr 28px 28px 28px 34px; gap: 4px; }
+         .ld-tle-panel__keyword-row .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
       }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
