@@ -222,10 +222,17 @@
 
   function keywordCategory(row) {
     const title = row.querySelector('.raw-topic-link, .title, .link-top-line')?.textContent || '';
-    const tagsText = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')].map((el) => el.textContent).join(' ');
+    const tagElements = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')];
+    const tagsText = tagElements.map((el) => el.textContent).join(' ');
     const haystack = `${title} ${tagsText}`.toLowerCase();
     const rule = keywordRules.find((r) => r.enabled && r.keyword && haystack.includes(r.keyword.toLowerCase()) && boundEffects(r.effectIds).length);
-    return rule ? { rule, effects: boundEffects(rule.effectIds, rule.color) } : null;
+    if (!rule) return null;
+    const keyword = rule.keyword.toLowerCase();
+    return {
+      rule,
+      effects: boundEffects(rule.effectIds, rule.color),
+      matchingTags: tagElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
+    };
   }
 
   function moveKeywordRule(id, direction) {
@@ -378,6 +385,7 @@
 
   function applyMarks() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
+      row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => el.classList.remove('ld-tle-keyword-match'));
       const posters = row.querySelector('td.posters');
       const opLink = posters && (
         [...posters.querySelectorAll('a[data-user-card]')].find((a) => {
@@ -388,6 +396,7 @@
       const user = opLink && opLink.getAttribute('data-user-card');
       const mark = getMark(user);
       const keywordMatch = keywordCategory(row);
+      keywordMatch?.matchingTags.forEach((el) => el.classList.add('ld-tle-keyword-match'));
       const candidates = [];
       if (mark) {
         markEffects(mark).forEach((effect) => candidates.push(effect));
@@ -2075,7 +2084,7 @@
           tr.${EFFECT_CLASS}--${effect.id} .link-top-line { ${strike} }
           tr.${EFFECT_CLASS}--${effect.id} .link-top-line > a,
           tr.${EFFECT_CLASS}--${effect.id} .link-top-line .raw-topic-link { ${mosaic} }
-         tr.${EFFECT_CLASS}--tag-highlight:not(.ld-tle-welfare-only) .discourse-tag { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
+          tr.${EFFECT_CLASS}--tag-highlight:not(.ld-tle-welfare-only) .ld-tle-keyword-match { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
          tr.${EFFECT_CLASS}--tag-highlight.ld-tle-welfare-only .badge-category { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
          tr.${EFFECT_CLASS}--${effect.id} .link-top-line::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
