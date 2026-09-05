@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.46.0
+// @version      0.47.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -1215,9 +1215,10 @@
     cats.forEach((c) => {
       const row = document.createElement('div');
       row.className = 'ld-tle-panel__cat';
-      const label = document.createElement('input');
-      label.type = 'text';
-      label.value = c.label;
+       const label = document.createElement('input');
+       label.type = 'text';
+       label.className = 'ld-tle-panel__cat-label-input';
+       label.value = c.label;
        const effect = document.createElement('div');
        effect.className = 'ld-tle-panel__effect-choices';
        effects.filter((item) => EFFECT_LIBRARY_IDS.has(item.id)).forEach((item) => {
@@ -1231,14 +1232,17 @@
        });
        const color = document.createElement('input');
        color.type = 'color';
+       color.className = 'ld-tle-panel__cat-color-input';
        color.value = c.color || (boundEffects(c.effectIds)[0] || {}).color || '#0969da';
        color.title = '分组颜色';
        const priority = document.createElement('input');
        priority.type = 'number';
+       priority.className = 'ld-tle-panel__cat-priority-input';
        priority.value = c.priority ?? 10000;
        priority.title = '分组优先级';
-      const del = document.createElement('button');
-      del.type = 'button';
+       const del = document.createElement('button');
+       del.type = 'button';
+       del.className = 'ld-tle-panel__cat-delete';
       del.textContent = '删';
       label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
        effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.querySelectorAll('input:checked')].map((option) => option.value) }));
@@ -1873,7 +1877,12 @@
       .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
       .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
       .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
-      .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 2fr) 32px 68px 38px; gap: 7px; align-items: center; padding: 7px 0; }
+       .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
+       .ld-tle-panel__cat > .ld-tle-panel__cat-label-input { grid-column: 1; grid-row: 1; min-width: 0; }
+       .ld-tle-panel__cat > .ld-tle-panel__cat-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
+       .ld-tle-panel__cat > .ld-tle-panel__cat-priority-input { grid-column: 3; grid-row: 1; }
+       .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 4; grid-row: 1; }
+       .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
       .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; padding: 5px 6px; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
       .ld-tle-panel__cat input[type="number"] { width: 56px; padding: 5px 6px; }
@@ -1927,7 +1936,7 @@
         .ld-tle-panel__stat { padding: 8px; }
          .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
          .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
-         .ld-tle-panel__cat { grid-template-columns: 1fr 32px 68px 38px; }
+          .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 38px; gap: 4px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
           .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 38px; gap: 4px; }
       }
