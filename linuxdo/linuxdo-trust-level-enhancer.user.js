@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.41.0
+// @version      0.42.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -2031,17 +2031,20 @@
         tr.${EFFECT_CLASS}--${effect.id} td {
            ${dim ? `opacity: ${opacity} !important; filter: grayscale(.75) !important;` : ''}
            ${tint ? `background: rgba(${r},${g},${b},.14) !important;` : ''}
-           ${mosaic}
-        }
+         }
         tr.${EFFECT_CLASS}--${effect.id} td:first-child,
         tr.${EFFECT_CLASS}--${effect.id} td.main-link { ${colorLine} }
-         tr.${EFFECT_CLASS}--${effect.id} .link-top-line { ${strike} ${mosaic} }
+          tr.${EFFECT_CLASS}--${effect.id} .link-top-line { ${strike} }
+          tr.${EFFECT_CLASS}--${effect.id} .link-top-line > a,
+          tr.${EFFECT_CLASS}--${effect.id} .link-top-line .raw-topic-link { ${mosaic} }
          tr.${EFFECT_CLASS}--tag-highlight:not(.ld-tle-welfare-only) .discourse-tag { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
          tr.${EFFECT_CLASS}--tag-highlight.ld-tle-welfare-only .badge-category { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
-        tr.${EFFECT_CLASS}--${effect.id} .raw-topic-link::after {
+         tr.${EFFECT_CLASS}--${effect.id} .link-top-line::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
         }
-         tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? `opacity: ${Math.min(1, opacity + 0.25)} !important; filter: grayscale(.35) !important;` : mosaic ? 'filter: none !important;' : ''} }
+          tr.${EFFECT_CLASS}--${effect.id}:hover td { ${dim ? `opacity: ${Math.min(1, opacity + 0.25)} !important; filter: grayscale(.35) !important;` : ''} }
+          tr.${EFFECT_CLASS}--${effect.id}:hover .link-top-line > a,
+          tr.${EFFECT_CLASS}--${effect.id}:hover .link-top-line .raw-topic-link { ${mosaic ? 'filter: none !important;' : ''} }
         .${MARK_BADGE}--effect-${effect.id} { color: ${fg}; background: ${effect.color}; }
       `;
     }).concat(tags.map((t) => {
