@@ -35,6 +35,7 @@
   const MARK_BADGE = 'ld-tle-mark-badge';
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
+  const BOOST_MARK_CLASS = 'ld-tle-boost-mark';
   const DEFAULT_CATS = [
     { id: 'block', label: '屏蔽', effectIds: ['fade-light'], color: '#6e7681', priority: 10000, hint: '弱化显示' },
     { id: 'caution', label: '注意', effectIds: ['left-highlight'], color: '#d4a72c', priority: 10000, hint: '黄色警示' },
@@ -424,6 +425,38 @@
     document.querySelectorAll('#user-card, .user-card, .d-user-card').forEach((card) => {
       const name = cardUsername(card);
       decorateUserCard(card, name, getMark(name));
+    });
+
+    decorateBoosts();
+  }
+
+  function decorateBoosts() {
+    document.querySelectorAll('.discourse-boosts__list .discourse-boosts__bubble').forEach((bubble) => {
+      const avatar = bubble.querySelector('a[data-user-card] img.avatar');
+      if (!avatar) return;
+      const username = usernameFromEl(avatar.closest('a[data-user-card]'));
+      const mark = getMark(username);
+      const groups = (mark?.groups || []).map((binding) => ({ binding, group: getCat(binding.id) })).filter((item) => item.group);
+      bubble.classList.remove(BOOST_MARK_CLASS);
+      avatar.classList.remove(BOOST_MARK_CLASS);
+      avatar.style.removeProperty('--ld-tle-boost-color');
+      if (!groups.length) {
+        if (avatar.dataset.ldTleBoostTitle) avatar.title = avatar.dataset.ldTleBoostTitle;
+        else avatar.removeAttribute('title');
+        delete avatar.dataset.ldTleBoostTitle;
+        bubble.removeAttribute('data-ld-tle-boost-title');
+        return;
+      }
+
+      const first = groups[0].group;
+      const labels = groups.map(({ binding, group }) => binding.reason ? `${group.label}: ${binding.reason}` : group.label);
+      const description = `@${username} · ${labels.join('、')}`;
+      bubble.classList.add(BOOST_MARK_CLASS);
+      avatar.classList.add(BOOST_MARK_CLASS);
+      avatar.style.setProperty('--ld-tle-boost-color', first.color || '#0969da');
+      if (avatar.dataset.ldTleBoostTitle == null) avatar.dataset.ldTleBoostTitle = avatar.getAttribute('title') || '';
+      avatar.title = description;
+      bubble.dataset.ldTleBoostTitle = description;
     });
   }
 
@@ -1754,6 +1787,38 @@
         font-weight: 600;
       }
       tr.${PROMO_CLASS} .${TIME_CLASS} { opacity: .7; }
+      .discourse-boosts__bubble.${BOOST_MARK_CLASS} { position: relative; }
+      .discourse-boosts__bubble .${BOOST_MARK_CLASS} {
+        box-shadow: 0 0 0 2px var(--ld-tle-boost-color), 0 0 0 3px rgba(255,255,255,.9);
+        transition: box-shadow .15s ease;
+      }
+      .discourse-boosts__bubble.${BOOST_MARK_CLASS}::after {
+        content: attr(data-ld-tle-boost-title);
+        position: absolute;
+        z-index: 5;
+        left: 50%;
+        bottom: calc(100% + 7px);
+        width: max-content;
+        max-width: min(280px, calc(100vw - 24px));
+        padding: 5px 8px;
+        border: 1px solid #d0d7de;
+        border-radius: 5px;
+        color: #24292f;
+        background: #fff;
+        box-shadow: 0 3px 12px rgba(31,35,40,.18);
+        font: 500 12px/17px ui-sans-serif, system-ui, sans-serif;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-50%, 4px);
+        transition: opacity .12s ease, transform .12s ease;
+      }
+      .discourse-boosts__bubble.${BOOST_MARK_CLASS}:hover::after,
+      .discourse-boosts__bubble.${BOOST_MARK_CLASS}:focus-within::after {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
       .${MARK_ROW} {
         display: flex;
         flex-wrap: wrap;
