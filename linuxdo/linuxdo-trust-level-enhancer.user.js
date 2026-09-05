@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.47.0
+// @version      0.57.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -166,14 +166,12 @@
   }
 
   function markEffects(mark) {
-    return mark ? boundEffects(getCat(mark.level)?.effectIds) : [];
-  }
-
-  function tagEffects(mark) {
-    return normalizeTagIds(mark && mark.tags).map((id) => {
-      const tag = getTag(id);
-      return tag ? { id: `tag-${tag.id}`, label: tag.label, kind: 'badge', color: tag.color, hint: tag.label, enabled: true } : null;
-    }).filter(Boolean);
+    if (!mark) return [];
+    const groupIds = (mark.groups || []).map((group) => group.id);
+    return groupIds.flatMap((id) => {
+      const group = getCat(id);
+      return group ? boundEffects(group.effectIds).map((effect) => ({ ...effect, priority: group.priority })) : [];
+    });
   }
 
   function normalizeTag(raw) {
@@ -257,12 +255,11 @@
       const out = {};
       for (const [k, v] of Object.entries(raw)) {
         const user = String(k).trim().toLowerCase();
-        const level = v && v.level;
-        if (user && typeof level === 'string' && getCat(level)) {
+        const groups = normalizeMarkGroups(v && v.groups);
+        if (user && groups.length) {
           out[user] = {
-            level,
+            groups,
             note: (v && v.note) || '',
-            tags: Array.isArray(v && v.tags) ? v.tags.map(String) : [],
             at: (v && v.at) || Date.now(),
           };
         }
@@ -288,12 +285,18 @@
     if (!level) {
       delete marks[user];
       } else if (getCat(level)) {
-      const prev = marks[user] || {};
-      marks[user] = {
-        level,
-        note: note != null ? String(note) : (prev.note || ''),
-        tags: opts && opts.tags != null ? normalizeTagIds(opts.tags) : (prev.tags || []),
-        at: Date.now(),
+        const prev = marks[user] || {};
+        const previousGroups = prev.groups || [{ id: prev.level }];
+        const groupIds = opts && opts.groupIds ? opts.groupIds : previousGroups.map((group) => group.id);
+        const reasons = opts && opts.groupReasons ? opts.groupReasons : Object.fromEntries(previousGroups.map((group) => [group.id, group.reason || '']));
+        const groups = normalizeMarkGroups([
+          { id: level, reason: reasons[level] || '' },
+          ...groupIds.filter((id) => id !== level).map((id) => ({ id, reason: reasons[id] || '' })),
+        ]);
+        marks[user] = {
+          groups,
+          note: note != null ? String(note) : (prev.note || ''),
+          at: Date.now(),
       };
     }
     saveMarks();
@@ -301,6 +304,51 @@
     if (!opts || !opts.keepPanel) {
       if (panelEl && panelEl.classList.contains('is-open')) renderPanelList();
     }
+  }
+
+  function setMarkGroups(username, groups, note) {
+    const user = String(username || '').trim().toLowerCase();
+    const normalized = normalizeMarkGroups(groups);
+    if (!user || !normalized.length) return;
+    marks[user] = { groups: normalized, note: String(note || ''), at: Date.now() };
+    saveMarks();
+    applyMarks();
+  }
+
+  function normalizeTagReasons(reasons, tagIds) {
+    const allowed = new Set(normalizeTagIds(tagIds));
+    return Object.fromEntries(Object.entries(reasons && typeof reasons === 'object' ? reasons : {})
+      .filter(([id, reason]) => allowed.has(id) && String(reason).trim())
+      .map(([id, reason]) => [id, String(reason).trim()]));
+  }
+
+  function normalizeGroupTagIds(list) {
+    const seen = new Set();
+    return (Array.isArray(list) ? list : []).map(String).filter((id) => {
+      if (!getCat(id) || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+
+  function normalizeGroupTagReasons(reasons, groupIds) {
+    const allowed = new Set(normalizeGroupTagIds(groupIds));
+    return Object.fromEntries(Object.entries(reasons && typeof reasons === 'object' ? reasons : {})
+      .filter(([id, reason]) => allowed.has(id) && String(reason).trim())
+      .map(([id, reason]) => [id, String(reason).trim()]));
+  }
+
+  function normalizeMarkGroups(groups) {
+    const seen = new Set();
+    return (Array.isArray(groups) ? groups : []).map((group) => {
+      const id = typeof group === 'string' ? group : group && group.id;
+      const reason = typeof group === 'object' && group ? group.reason : '';
+      return { id: String(id || ''), reason: String(reason || '').trim() };
+    }).filter((group) => {
+      if (!getCat(group.id) || seen.has(group.id)) return false;
+      seen.add(group.id);
+      return true;
+    });
   }
 
   function usernameFromEl(el) {
@@ -342,8 +390,7 @@
       const keywordMatch = keywordCategory(row);
       const candidates = [];
       if (mark) {
-        const group = getCat(mark.level);
-        markEffects(mark).forEach((effect) => candidates.push({ ...effect, priority: group?.priority ?? 10000 }));
+        markEffects(mark).forEach((effect) => candidates.push(effect));
       }
       if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: keywordMatch.rule.priority ?? 5000 }));
       reusableEffectForRow(row).forEach((effect) => {
@@ -475,15 +522,16 @@
 
   function paintBadges(host, mark, username) {
     if (!host) return;
-    const effects = mark ? [...markEffects(mark), ...tagEffects(mark)] : [];
-    const tagIds = [];
+    const effects = mark ? markEffects(mark) : [];
+    const groupIds = mark ? (mark.groups || []).map((group) => group.id) : [];
     const wanted = [];
     effects.filter((effect) => effect.kind === 'badge').forEach((effect) => {
       wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label });
     });
-    tagIds.forEach((id) => {
-      const t = getTag(id);
-      if (t) wanted.push({ kind: 'tag', id: t.id, label: t.label, title: t.label, color: t.color });
+    groupIds.forEach((id) => {
+      const group = getCat(id);
+      const binding = mark.groups.find((item) => item.id === id) || { reason: '' };
+      if (group) wanted.push({ kind: 'group-tag', id: group.id, label: group.label, title: binding.reason || group.label, color: group.color || '#0969da' });
     });
     [...host.children].forEach((el) => {
       if (el.classList.contains(MARK_BADGE) || el.classList.contains(MARK_ADD)) return;
@@ -539,34 +587,18 @@
     `;
     const tagBox = document.createElement('div');
     tagBox.className = 'ld-tle-picker__tags';
-    pickerEl.append(head, levels, tagBox, note, actions);
+    pickerEl.append(head, levels, note, actions);
+    const currentGroups = current?.groups || [];
     cats.forEach((group) => {
       const option = document.createElement('option');
       option.value = group.id;
       option.textContent = group.label;
-      option.selected = !!current && current.level === group.id;
+       option.selected = !!current && current.groups?.[0]?.id === group.id;
       levels.append(option);
-    });
-    const currentTags = new Set(current ? normalizeTagIds(current.tags) : []);
-    if (tags.length) {
-      const lab = document.createElement('div');
-      lab.className = 'ld-tle-picker__sub';
-      lab.textContent = '子标签';
-      tagBox.append(lab);
-    }
-    tags.forEach((t) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.dataset.tag = t.id;
-      b.className = `ld-tle-picker__tag ld-tle-picker__tag--tag-${t.id}${currentTags.has(t.id) ? ' is-on' : ''}`;
-      b.textContent = t.label;
-      b.addEventListener('click', () => b.classList.toggle('is-on'));
-      tagBox.append(b);
     });
     pickerEl.querySelector('[data-act="save"]').addEventListener('click', () => {
       const selectedGroup = levels.value;
-      const selected = [...pickerEl.querySelectorAll('.ld-tle-picker__tag.is-on')].map((x) => x.dataset.tag);
-      setMark(username, selectedGroup || null, note.value.trim(), { tags: selected });
+      setMark(username, selectedGroup || null, note.value.trim());
       closePicker();
     });
     pickerEl.querySelector('[data-act="clear"]').addEventListener('click', () => {
@@ -583,7 +615,7 @@
 
   function exportMarks() {
     return JSON.stringify({
-      version: 5,
+      version: 8,
       exportedAt: new Date().toISOString(),
       effects,
       cats,
@@ -600,19 +632,17 @@
     const parsed = [];
     for (const item of entries) {
       const username = String(item.username || '').trim().toLowerCase();
-      const level = item.level;
-      if (!username || !level) continue;
+      const groups = normalizeMarkGroups(item.groups);
+      if (!username || !groups.length) continue;
       parsed.push({
         username,
-        level,
+        groups,
         note: item.note || '',
-        tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
         at: item.at || Date.now(),
       });
     }
     const importedEffects = Array.isArray(data && data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
     const importedCats = Array.isArray(data && data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
-    const importedTags = Array.isArray(data && data.tags) ? data.tags.map(normalizeTag).filter(Boolean) : [];
     const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && Array.isArray(r.effectIds)).map((r) => ({
        id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
        keyword: String(r.keyword).trim(),
@@ -621,10 +651,10 @@
        priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
        enabled: r.enabled !== false,
      })) : [];
-    return { parsed, importedEffects, importedCats, importedTags, importedRules };
+    return { parsed, importedEffects, importedCats, importedRules };
   }
 
-  function mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode) {
+  function mergeImported(parsed, importedEffects, importedCats, importedRules, mode) {
     let added = 0;
     let updated = 0;
     let skipped = 0;
@@ -636,33 +666,26 @@
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
     });
-    importedTags.forEach((tag) => {
-      if (!getTag(tag.id)) tags.push(tag);
-    });
     importedRules.forEach((rule) => {
       if (!keywordRules.some((r) => r.keyword.toLowerCase() === rule.keyword.toLowerCase())) keywordRules.push(rule);
     });
     for (const item of parsed) {
-      (item.tags || []).forEach((id) => {
-        if (!getTag(id)) tags.push({ id, label: id, color: '#8250df' });
-      });
       const prev = marks[item.username];
       if (!prev) {
-        marks[item.username] = { level: item.level, note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { groups: item.groups, note: item.note, at: item.at };
         added++;
         continue;
       }
       if (mode === 'skip') { skipped++; continue; }
       if (mode === 'replace') {
-        marks[item.username] = { level: item.level, note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { groups: item.groups, note: item.note, at: item.at };
         updated++;
         continue;
       }
       const note = item.note && item.note !== prev.note
         ? (prev.note ? `${prev.note} | ${item.note}` : item.note)
         : prev.note;
-      const mergedTags = [...new Set([...(prev.tags || []), ...(item.tags || [])])];
-      marks[item.username] = { level: item.level, note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
+      marks[item.username] = { groups: normalizeMarkGroups([...(prev.groups || []), ...(item.groups || [])]), note, at: Math.max(prev.at || 0, item.at || 0) };
       updated++;
     }
     saveCats();
@@ -689,7 +712,7 @@
       if (older.note && older.note !== newer.note) {
         newer.note = newer.note ? `${newer.note} | ${older.note}` : older.note;
       }
-      newer.tags = [...new Set([...(newer.tags || []), ...(older.tags || [])])];
+      newer.groups = normalizeMarkGroups([...(newer.groups || []), ...(older.groups || [])]);
       seen.set(key, newer);
     }
     marks = Object.fromEntries([...seen.entries()]);
@@ -1257,9 +1280,9 @@
   function runImport(mode) {
     const ta = panelEl.querySelector('.ld-tle-panel__json');
     try {
-      const { parsed, importedEffects, importedCats, importedTags, importedRules } = parseImport(ta.value);
+      const { parsed, importedEffects, importedCats, importedRules } = parseImport(ta.value);
       if (!parsed.length) { showPanelMsg('没有可导入的标记'); return; }
-      const r = mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode);
+      const r = mergeImported(parsed, importedEffects, importedCats, importedRules, mode);
       renderPanelList();
       showPanelMsg(`新增 ${r.added}，更新 ${r.updated}，跳过 ${r.skipped}`);
     } catch (e) {
@@ -1282,7 +1305,7 @@
     panelEl.querySelector('.ld-tle-panel__stat-tags').textContent = tags.length;
     const entries = Object.entries(marks)
       .filter(([user, info]) => {
-         if (filter && info.level !== filter) return false;
+          if (filter && !(info.groups || []).some((group) => group.id === filter)) return false;
         if (!q) return true;
         return user.includes(q) || (info.note || '').toLowerCase().includes(q);
       })
@@ -1298,38 +1321,54 @@
       row.className = 'ld-tle-panel__row';
       row.innerHTML = `
         <a href="/u/${encodeURIComponent(user)}" target="_blank" rel="noopener">@${user}</a>
-        <select></select>
         <div class="ld-tle-panel__row-tags"></div>
-        <input type="text" placeholder="备注" value="">
+        <input type="text" class="ld-tle-panel__row-note" placeholder="备注" value="">
         <button type="button" data-act="del">删</button>
       `;
-       const sel = row.querySelector('select');
-       cats.forEach((m) => {
-         const opt = document.createElement('option');
-         opt.value = m.id;
-         opt.textContent = m.label;
-         if (m.id === info.level) opt.selected = true;
-         sel.append(opt);
-       });
       const note = row.querySelector('input');
       note.value = info.note || '';
-      const tagBox = row.querySelector('.ld-tle-panel__row-tags');
-      tags.forEach((tag) => {
-        const tagButton = document.createElement('button');
-        tagButton.type = 'button';
-        tagButton.className = 'ld-tle-panel__row-tag' + (normalizeTagIds(info.tags).includes(tag.id) ? ' is-on' : '');
-        tagButton.textContent = tag.label;
-        tagButton.title = '切换子标签';
-        tagButton.addEventListener('click', () => {
-          tagButton.classList.toggle('is-on');
-          const selectedTags = [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag);
-            setMark(user, sel.value, note.value, { tags: selectedTags, keepPanel: true });
-        });
-        tagButton.dataset.tag = tag.id;
-        tagBox.append(tagButton);
-      });
-       sel.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
-        note.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+       const tagBox = row.querySelector('.ld-tle-panel__row-tags');
+       const selectedGroups = info.groups || [];
+       const selectedGroupIds = new Set(selectedGroups.map((group) => group.id));
+       selectedGroups.forEach((binding) => {
+         const group = getCat(binding.id);
+         if (!group) return;
+         const tagButton = document.createElement('button');
+         tagButton.type = 'button';
+         tagButton.className = 'ld-tle-panel__row-tag is-on ld-tle-panel__row-group-tag';
+         tagButton.textContent = group.label;
+          tagButton.title = binding.reason || '点击编辑绑定原因';
+          tagButton.addEventListener('click', () => {
+            const reason = window.prompt(`编辑「${group.label}」的绑定原因`, binding.reason || '');
+           if (reason == null) return;
+           const nextGroups = selectedGroups.map((item) => item.id === group.id ? { ...item, reason } : item);
+             setMarkGroups(user, nextGroups, note.value);
+           renderPanelList();
+         });
+         tagBox.append(tagButton);
+       });
+       const picker = document.createElement('select');
+       picker.className = 'ld-tle-panel__row-tag-picker';
+       const empty = document.createElement('option');
+       empty.value = '';
+       empty.textContent = '添加已有分组标签';
+       picker.append(empty);
+       cats.filter((group) => !selectedGroupIds.has(group.id)).forEach((group) => {
+         const option = document.createElement('option');
+         option.value = group.id;
+         option.textContent = group.label;
+         picker.append(option);
+       });
+       picker.addEventListener('change', () => {
+           const group = getCat(picker.value);
+           if (!group) return;
+            const reason = window.prompt(`请输入「${group.label}」的绑定备注`, '');
+            const nextGroups = [...selectedGroups, { id: group.id, reason: reason || '' }];
+            setMarkGroups(user, nextGroups, note.value);
+           renderPanelList();
+       });
+       tagBox.append(picker);
+         note.addEventListener('change', () => setMarkGroups(user, selectedGroups, note.value));
       row.querySelector('[data-act="del"]').addEventListener('click', () => {
         setMark(user, null);
         renderPanelList();
@@ -1785,6 +1824,8 @@
         font: 600 11px/18px ui-sans-serif, system-ui, sans-serif;
       }
       .ld-tle-picker__tag.is-on { color: #fff; }
+      .ld-tle-picker__tag-reasons { display: flex; flex-direction: column; gap: 5px; margin: 0 0 8px; }
+      .ld-tle-picker__tag-reasons input { width: 100%; box-sizing: border-box; padding: 5px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit; font: inherit; }
       .ld-tle-picker__lv {
         padding: 2px 8px;
         border: 1px solid #d0d7de;
@@ -1904,13 +1945,19 @@
       .ld-tle-panel__add button, .ld-tle-panel__cat-add button, .ld-tle-panel__tag-add button { padding: 7px 12px; border: 0 !important; border-radius: 6px !important; background: #0969da !important; color: #fff !important; font-weight: 700; cursor: pointer; }
       .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover, .ld-tle-panel__tag-add button:hover { background: #0757b8 !important; }
       .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
-      .ld-tle-panel__list { max-height: 390px; overflow: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
-      .ld-tle-panel__row { display: grid; grid-template-columns: minmax(88px, 1fr) 92px minmax(100px, 1.5fr) minmax(90px, 1fr) 38px; gap: 7px; align-items: center; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
+       .ld-tle-panel__list { max-height: 390px; min-width: 0; overflow-x: hidden; overflow-y: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
+       .ld-tle-panel__row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(220px, 2fr) minmax(100px, 1fr) 38px; gap: 7px; align-items: center; min-width: 0; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__row:hover { border-radius: 6px; background: #f8fafc; }
       .ld-tle-panel__row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-      .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
-      .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
+       .ld-tle-panel__row > select, .ld-tle-panel__row-note { width: 100%; min-width: 0; box-sizing: border-box; }
+       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+       .ld-tle-panel__row-tags-label, .ld-tle-panel__row-tags-empty { color: #8b949e; font-size: 11px; }
+       .ld-tle-panel__row-tags-label { margin-right: 2px; }
+       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
+       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
+       .ld-tle-panel__row-group-tag { border-color: #0969da; background: #eaf3ff; color: #0969da; }
+       .ld-tle-panel__row-tag-add { border-style: dashed; color: #0969da; }
+       .ld-tle-panel__row-tag-picker { max-width: 140px; min-width: 110px; padding: 3px 5px; }
        .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 28px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-word { grid-column: 1; grid-row: 1; min-width: 0; }
        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
@@ -1934,8 +1981,10 @@
         .ld-tle-panel__bar { top: -12px; }
         .ld-tle-panel__overview { gap: 5px; }
         .ld-tle-panel__stat { padding: 8px; }
-         .ld-tle-panel__row { grid-template-columns: 1fr 82px 38px; }
-         .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
+          .ld-tle-panel__row { grid-template-columns: minmax(0, 1fr) 38px; gap: 5px; }
+          .ld-tle-panel__row > a { grid-column: 1; min-width: 0; }
+          .ld-tle-panel__row > [data-act="del"] { grid-column: 2; grid-row: 1; }
+          .ld-tle-panel__row-tags, .ld-tle-panel__row-note { grid-column: 1 / -1; }
           .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 38px; gap: 4px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
           .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 38px; gap: 4px; }
@@ -2036,13 +2085,16 @@
           tr.${EFFECT_CLASS}--${effect.id}:hover .link-top-line .raw-topic-link { ${mosaic ? 'filter: none !important;' : ''} }
         .${MARK_BADGE}--effect-${effect.id} { color: ${fg}; background: ${effect.color}; }
       `;
-    }).concat(tags.map((t) => {
+    }).concat(cats.map((group) => {
+      const color = group.color || '#0969da';
+      return `.${MARK_BADGE}--group-tag-${group.id} { color: ${contrastColor(color)}; background: ${color}; }`;
+    })).concat(tags.map((t) => {
       const fg = contrastColor(t.color);
       return `
-        .${MARK_BADGE}--effect-tag-${t.id} { color: ${fg}; background: ${t.color}; }
-        .${MARK_BADGE}--tag-${t.id} { color: ${fg}; background: ${t.color}; }
+         .${MARK_BADGE}--effect-tag-${t.id} { color: ${fg}; background: ${t.color}; }
+         .${MARK_BADGE}--tag-${t.id} { color: ${fg}; background: ${t.color}; }
         .ld-tle-picker__tag--${t.id}.is-on { color: ${fg}; background: ${t.color}; border-color: ${t.color}; }
-      `;
+       `;
     })).join('\n');
   }
 
