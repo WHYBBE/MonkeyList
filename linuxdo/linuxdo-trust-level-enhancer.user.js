@@ -11,6 +11,7 @@
 (function () {
   'use strict';
 
+  const SCRIPT_VERSION = '0.58.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -807,7 +808,7 @@
     panelEl.className = 'ld-tle-panel';
     panelEl.innerHTML = `
       <div class="ld-tle-panel__bar">
-        <div><strong>用户标记</strong><span class="ld-tle-panel__subtitle">本地保存，仅你可见</span></div>
+        <div><strong>用户标记</strong><span class="ld-tle-panel__subtitle">本地保存，仅你可见 · v${SCRIPT_VERSION}</span></div>
         <button type="button" data-act="close" aria-label="关闭">关闭</button>
       </div>
       <div class="ld-tle-panel__nav" role="tablist">
