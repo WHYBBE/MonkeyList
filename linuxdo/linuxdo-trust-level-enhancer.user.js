@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.43.0
+// @version      0.44.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -36,7 +36,7 @@
   const MARK_ADD = 'ld-tle-mark-add';
   const MARK_ROW = 'ld-tle-mark-row';
   const DEFAULT_CATS = [
-    { id: 'block', label: '屏蔽', effectIds: ['promo-dim'], color: '#6e7681', priority: 10000, hint: '弱化显示' },
+    { id: 'block', label: '屏蔽', effectIds: ['fade-light'], color: '#6e7681', priority: 10000, hint: '弱化显示' },
     { id: 'caution', label: '注意', effectIds: ['left-highlight'], color: '#d4a72c', priority: 10000, hint: '黄色警示' },
     { id: 'watch', label: '关注', effectIds: ['left-highlight'], color: '#0969da', priority: 10000, hint: '蓝色高亮' },
     { id: 'friend', label: '友好', effectIds: ['left-highlight'], color: '#1a7f37', priority: 10000, hint: '绿色高亮' },
@@ -59,23 +59,13 @@
     { id: 'lonely', label: '待回复', color: '#9a6700', mode: 'normal', kind: 'badge', priority: 20, hint: '标记待回复主题' },
   ].map((effect) => ({ ...effect, builtin: true, enabled: true }));
   const BUILTIN_EFFECT_IDS = new Set(DEFAULT_EFFECTS.map((effect) => effect.id));
-  const LEGACY_EFFECT_ID_MAP = {
-    fade1: 'fade-light',
-    fade2: 'strike',
-    'promo-dim': 'fade-light',
-    'lottery-dim': 'fade-light',
-    'stale-dim': 'fade-light',
-  };
   const EFFECT_LIBRARY_IDS = new Set(['left-highlight', 'tag-highlight', 'normal', 'fade-light', 'fade-deep', 'strike', 'mosaic']);
   const NAME_SEL = '.badge-category__name';
   const PROMO_TAGS = ['高级推广'];
   const LOTTERY_TAGS = ['抽奖'];
 
   function libraryEffectIds(ids) {
-    return [...new Set((Array.isArray(ids) ? ids : [ids]).map(String).map((id) => {
-      if (['color-mark', 'lv1', 'lv2', 'lv3', 'lv4', 'rich', 'welfare'].includes(id)) return 'left-highlight';
-      return LEGACY_EFFECT_ID_MAP[id] || id;
-    }).filter((id) => EFFECT_LIBRARY_IDS.has(id)))];
+    return [...new Set((Array.isArray(ids) ? ids : []).filter((id) => EFFECT_LIBRARY_IDS.has(id)))];
   }
 
   let opUserId = null;
@@ -89,20 +79,20 @@
   let panelEl = null;
 
   cats.forEach((group) => {
-    group.effectIds = libraryEffectIds(group.effectIds || [group.effectId]).filter((id) => getEffect(id));
+    group.effectIds = libraryEffectIds(group.effectIds).filter((id) => getEffect(id));
     if (!group.effectIds.length) group.effectIds = ['left-highlight'];
   });
 
   function normalizeCat(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const label = String(raw.label || raw.name || '').trim();
+    const label = String(raw.label || '').trim();
     const hint = String(raw.hint || '').trim();
     if (!id || !label) return null;
-    const effectIds = libraryEffectIds(Array.isArray(raw.effectIds) ? raw.effectIds : [raw.effectId || raw.id]);
+    const effectIds = libraryEffectIds(raw.effectIds);
     const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '';
     const priority = Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 10000;
-    return { id, label, effectIds: effectIds.map(String), color, priority, hint };
+    return { id, label, effectIds, color, priority, hint };
   }
 
   function loadCats() {
@@ -126,7 +116,7 @@
   function normalizeEffect(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const label = String(raw.label || raw.name || '').trim();
+    const label = String(raw.label || '').trim();
     const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '#6e7681';
     const mode = ['normal', 'tint', 'dim'].includes(raw.mode) ? raw.mode : 'normal';
     if (!id || !label) return null;
@@ -147,11 +137,7 @@
       const saved = Array.isArray(raw) ? raw.map(normalizeEffect).filter(Boolean) : [];
       const byId = new Map(DEFAULT_EFFECTS.map((effect) => [effect.id, { ...effect }]));
       saved.forEach((effect) => {
-        if (isBuiltinEffect(effect.id)) {
-          const builtin = byId.get(effect.id);
-          builtin.enabled = effect.enabled !== false;
-          if (Number.isFinite(Number(effect.priority))) builtin.priority = Number(effect.priority);
-        }
+        byId.set(effect.id, { ...(byId.get(effect.id) || {}), ...effect });
       });
       return [...byId.values()];
     } catch (e) {
@@ -171,29 +157,16 @@
     return BUILTIN_EFFECT_IDS.has(id);
   }
 
-  function boundEffect(value) {
-    if (!value) return null;
-    const direct = getEffect(value);
-    if (direct) return direct;
-    const cat = getCat(value);
-    if (!cat) return null;
-    return boundEffects(cat.effectIds)[0] || null;
-  }
-
   function boundEffects(value, colorOverride) {
     const ids = Array.isArray(value) ? value : [value];
     return ids.flatMap((id) => {
-      const direct = getEffect(id);
-      if (direct) return [colorOverride && (direct.kind === 'color' || direct.kind === 'tag') ? { ...direct, color: colorOverride } : direct];
-      const cat = getCat(id);
-      return cat ? boundEffects(cat.effectIds, cat.color || colorOverride) : [];
+      const effect = getEffect(id);
+      return effect ? [colorOverride && (effect.kind === 'color' || effect.kind === 'tag') ? { ...effect, color: colorOverride } : effect] : [];
     }).filter((effect) => effect && effect.enabled !== false);
   }
 
   function markEffects(mark) {
-    if (!mark) return [];
-    if (getCat(mark.level)) return boundEffects(mark.level);
-    return boundEffects(mark.effects || mark.effect || mark.level);
+    return mark ? boundEffects(getCat(mark.level)?.effectIds) : [];
   }
 
   function tagEffects(mark) {
@@ -206,7 +179,7 @@
   function normalizeTag(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const id = String(raw.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const label = String(raw.label || raw.name || '').trim();
+    const label = String(raw.label || '').trim();
     const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw.color || '') ? raw.color : '#8250df';
     if (!id || !label) return null;
     return { id, label, color };
@@ -232,11 +205,12 @@
   function loadKeywordRules() {
     try {
       const raw = JSON.parse(localStorage.getItem(KEYWORDS_KEY) || '[]');
-      return Array.isArray(raw) ? raw.filter((r) => r && r.keyword && (r.effectIds || r.effects || r.effect || r.category)).map((r, index) => ({
+      return Array.isArray(raw) ? raw.filter((r) => r && r.keyword && Array.isArray(r.effectIds)).map((r, index) => ({
         id: String(r.id || `rule-${index + 1}`),
         keyword: String(r.keyword).trim(),
-        effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
+        effectIds: libraryEffectIds(r.effectIds).filter((id) => getEffect(id)),
         color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
+        priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
         enabled: r.enabled !== false,
       })) : [];
     } catch (e) {
@@ -283,14 +257,12 @@
       const out = {};
       for (const [k, v] of Object.entries(raw)) {
         const user = String(k).trim().toLowerCase();
-        const level = typeof v === 'string' ? v : v && v.level;
-        if (user && level) {
+        const level = v && v.level;
+        if (user && typeof level === 'string' && getCat(level)) {
           out[user] = {
             level,
             note: (v && v.note) || '',
             tags: Array.isArray(v && v.tags) ? v.tags.map(String) : [],
-            effect: (v && v.effect) || level,
-            effects: libraryEffectIds(Array.isArray(v && v.effects) ? v.effects : [(v && v.effect) || level]),
             at: (v && v.at) || Date.now(),
           };
         }
@@ -315,14 +287,10 @@
     if (!user) return;
     if (!level) {
       delete marks[user];
-    } else if (getCat(level) || getEffect(level)) {
+      } else if (getCat(level)) {
       const prev = marks[user] || {};
-      const effectIds = opts && Array.isArray(opts.effects)
-        ? opts.effects.map(String).filter((id) => getEffect(id) || getCat(id))
-        : (prev.effects || [prev.effect || level]).map(String);
       marks[user] = {
         level,
-        effects: effectIds.length ? effectIds : [level],
         note: note != null ? String(note) : (prev.note || ''),
         tags: opts && opts.tags != null ? normalizeTagIds(opts.tags) : (prev.tags || []),
         at: Date.now(),
@@ -598,10 +566,7 @@
     pickerEl.querySelector('[data-act="save"]').addEventListener('click', () => {
       const selectedGroup = levels.value;
       const selected = [...pickerEl.querySelectorAll('.ld-tle-picker__tag.is-on')].map((x) => x.dataset.tag);
-      setMark(username, selectedGroup || null, note.value.trim(), {
-        effects: selectedGroup ? [selectedGroup] : [],
-        tags: selected,
-      });
+      setMark(username, selectedGroup || null, note.value.trim(), { tags: selected });
       closePicker();
     });
     pickerEl.querySelector('[data-act="clear"]').addEventListener('click', () => {
@@ -618,7 +583,7 @@
 
   function exportMarks() {
     return JSON.stringify({
-      version: 4,
+      version: 5,
       exportedAt: new Date().toISOString(),
       effects,
       cats,
@@ -630,35 +595,28 @@
 
   function parseImport(text) {
     const data = JSON.parse(text);
-    let entries = [];
-    if (Array.isArray(data)) {
-      entries = data;
-    } else if (data && typeof data === 'object') {
-      const src = data.marks && typeof data.marks === 'object' ? data.marks : data;
-      if (Array.isArray(src)) entries = src;
-      else entries = Object.entries(src).map(([username, v]) => ({ username, ...(typeof v === 'object' ? v : { level: v }) }));
-    }
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !data.marks || typeof data.marks !== 'object' || Array.isArray(data.marks)) throw new Error('Invalid export');
+    const entries = Object.entries(data.marks).map(([username, value]) => ({ username, ...value }));
     const parsed = [];
     for (const item of entries) {
-      const username = String(item.username || item.user || item.name || '').trim().toLowerCase();
-      const level = item.effect || item.level || item.mark || item.tag;
+      const username = String(item.username || '').trim().toLowerCase();
+      const level = item.level;
       if (!username || !level) continue;
       parsed.push({
         username,
         level,
-        effect: item.effect || item.level,
         note: item.note || '',
         tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
         at: item.at || Date.now(),
       });
     }
-    const importedEffects = [];
+    const importedEffects = Array.isArray(data && data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
     const importedCats = Array.isArray(data && data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
     const importedTags = Array.isArray(data && data.tags) ? data.tags.map(normalizeTag).filter(Boolean) : [];
-    const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && (r.effectIds || r.effects || r.effect || r.category)).map((r) => ({
+    const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && Array.isArray(r.effectIds)).map((r) => ({
        id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
        keyword: String(r.keyword).trim(),
-       effectIds: libraryEffectIds(Array.isArray(r.effectIds) ? r.effectIds : Array.isArray(r.effects) ? r.effects : [r.effect || r.category]),
+       effectIds: libraryEffectIds(r.effectIds).filter((id) => getEffect(id)),
        color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
        priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
        enabled: r.enabled !== false,
@@ -671,7 +629,9 @@
     let updated = 0;
     let skipped = 0;
     importedEffects.forEach((effect) => {
-      if (!getEffect(effect.id)) effects.push(effect);
+      const current = getEffect(effect.id);
+      if (current) Object.assign(current, effect);
+      else effects.push(effect);
     });
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
@@ -688,13 +648,13 @@
       });
       const prev = marks[item.username];
       if (!prev) {
-        marks[item.username] = { level: item.level, effects: [item.effect || item.level], note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { level: item.level, note: item.note, tags: item.tags || [], at: item.at };
         added++;
         continue;
       }
       if (mode === 'skip') { skipped++; continue; }
       if (mode === 'replace') {
-        marks[item.username] = { level: item.level, effects: [item.effect || item.level], note: item.note, tags: item.tags || [], at: item.at };
+        marks[item.username] = { level: item.level, note: item.note, tags: item.tags || [], at: item.at };
         updated++;
         continue;
       }
@@ -702,7 +662,7 @@
         ? (prev.note ? `${prev.note} | ${item.note}` : item.note)
         : prev.note;
       const mergedTags = [...new Set([...(prev.tags || []), ...(item.tags || [])])];
-      marks[item.username] = { level: item.level, effects: [...new Set([...(prev.effects || [prev.effect]), item.effect || item.level].filter(Boolean))], note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
+      marks[item.username] = { level: item.level, note, tags: mergedTags, at: Math.max(prev.at || 0, item.at || 0) };
       updated++;
     }
     saveCats();
@@ -1352,13 +1312,13 @@
         tagButton.addEventListener('click', () => {
           tagButton.classList.toggle('is-on');
           const selectedTags = [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag);
-            setMark(user, sel.value, note.value, { effects: [sel.value], tags: selectedTags, keepPanel: true });
+            setMark(user, sel.value, note.value, { tags: selectedTags, keepPanel: true });
         });
         tagButton.dataset.tag = tag.id;
         tagBox.append(tagButton);
       });
-       sel.addEventListener('change', () => setMark(user, sel.value, note.value, { effects: [sel.value], tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
-       note.addEventListener('change', () => setMark(user, sel.value, note.value, { effects: [sel.value], tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+       sel.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
+        note.addEventListener('change', () => setMark(user, sel.value, note.value, { tags: [...tagBox.querySelectorAll('.is-on')].map((el) => el.dataset.tag), keepPanel: true }));
       row.querySelector('[data-act="del"]').addEventListener('click', () => {
         setMark(user, null);
         renderPanelList();
