@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.40.0
+// @version      0.41.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -546,8 +546,12 @@
     const head = document.createElement('div');
     head.className = 'ld-tle-picker__head';
     head.textContent = '标记 @' + username;
-    const levels = document.createElement('div');
+    const levels = document.createElement('select');
     levels.className = 'ld-tle-picker__levels';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = '选择分组';
+    levels.append(empty);
     const note = document.createElement('textarea');
     note.className = 'ld-tle-picker__note';
     note.rows = 2;
@@ -562,17 +566,12 @@
     const tagBox = document.createElement('div');
     tagBox.className = 'ld-tle-picker__tags';
     pickerEl.append(head, levels, tagBox, note, actions);
-      effects.forEach((meta) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.dataset.level = meta.id;
-      b.className = `ld-tle-picker__lv ld-tle-picker__lv--${meta.id}${current && (current.effect || current.level) === meta.id ? ' is-on' : ''}`;
-      b.textContent = meta.label;
-      b.title = meta.hint || meta.label;
-      b.addEventListener('click', () => {
-        levels.querySelectorAll('button').forEach((x) => x.classList.toggle('is-on', x === b));
-      });
-      levels.append(b);
+    cats.forEach((group) => {
+      const option = document.createElement('option');
+      option.value = group.id;
+      option.textContent = group.label;
+      option.selected = !!current && current.level === group.id;
+      levels.append(option);
     });
     const currentTags = new Set(current ? normalizeTagIds(current.tags) : []);
     if (tags.length) {
@@ -591,9 +590,12 @@
       tagBox.append(b);
     });
     pickerEl.querySelector('[data-act="save"]').addEventListener('click', () => {
-      const on = pickerEl.querySelector('.ld-tle-picker__lv.is-on');
+      const selectedGroup = levels.value;
       const selected = [...pickerEl.querySelectorAll('.ld-tle-picker__tag.is-on')].map((x) => x.dataset.tag);
-      setMark(username, on ? on.dataset.level : null, note.value.trim(), { tags: selected });
+      setMark(username, selectedGroup || null, note.value.trim(), {
+        effects: selectedGroup ? [selectedGroup] : [],
+        tags: selected,
+      });
       closePicker();
     });
     pickerEl.querySelector('[data-act="clear"]').addEventListener('click', () => {
@@ -1786,6 +1788,16 @@
       }
       .ld-tle-picker__head { font-weight: 700; margin-bottom: 8px; word-break: break-all; }
       .ld-tle-picker__levels, .ld-tle-picker__tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+      .ld-tle-picker__levels {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        background: #fff;
+        color: #24292f;
+        font: inherit;
+      }
       .ld-tle-picker__sub { width: 100%; font-size: 11px; color: #57606a; }
       .ld-tle-picker__tag {
         padding: 2px 8px;
@@ -1962,7 +1974,7 @@
         .${MARK_ADD} { border-color: #30363d; color: #8b949e; }
         .${MARK_ADD}:hover { background: #21262d; }
         .ld-tle-picker, .ld-tle-panel { background: #161b22; border-color: #30363d; color: #c9d1d9; }
-        .ld-tle-picker__lv, .ld-tle-picker__note, .ld-tle-picker__actions button,
+        .ld-tle-picker__levels, .ld-tle-picker__lv, .ld-tle-picker__note, .ld-tle-picker__actions button,
         .ld-tle-panel__q, .ld-tle-panel__filter, .ld-tle-panel__json, .ld-tle-panel button, .ld-tle-panel select, .ld-tle-panel input {
           background: #0d1117; border-color: #30363d; color: #c9d1d9;
         }
