@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.57.0
+// @version      0.58.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -20,8 +20,6 @@
   const STALE_CLASS = 'ld-tle-stale';
   const WELFARE_BADGE_CLASS = 'ld-tle-welfare';
   const TIME_CLASS = 'ld-tle-time';
-  const TIME_DONE = 'data-ld-tle-timedone';
-  const POSTERS_DONE = 'data-ld-tle-postersdone';
   const OP_POST_CLASS = 'ld-tle-op-post';
   const JUMP_CLASS = 'ld-tle-jump';
   const MARK_KEY = 'ld-tle-marks';
@@ -1437,22 +1435,50 @@
   }
 
   function enhanceBadge(nameEl) {
-    const parsed = parseLevel(nameEl.textContent);
+    const chip = nameEl.querySelector(':scope > .' + CHIP_CLASS);
+    const sourceText = [...nameEl.childNodes]
+      .filter((node) => node !== chip)
+      .map((node) => node.textContent || '')
+      .join(' ')
+      .trim();
+    const chipLevel = chip && [...chip.classList]
+      .map((className) => className.match(new RegExp(`^${CHIP_CLASS}--(\\d)$`)))
+      .find(Boolean)?.[1];
+    const parsed = parseLevel(sourceText) || (chipLevel != null
+      ? { name: sourceText, level: Number(chipLevel) }
+      : null);
     const row = nameEl.closest('tr.topic-list-item');
     const td = row && row.querySelector('td.main-link');
+    if (td) {
+      td.classList.remove(ROW_CLASS, `${ROW_CLASS}--0`, `${ROW_CLASS}--1`, `${ROW_CLASS}--2`, `${ROW_CLASS}--3`, `${ROW_CLASS}--4`);
+    }
     if (td && parsed) {
       td.classList.add(ROW_CLASS, `${ROW_CLASS}--${parsed.level}`);
     }
-    const intact = nameEl.lastElementChild && nameEl.lastElementChild.classList.contains(CHIP_CLASS);
-    if (intact || !parsed) return;
+    if (!parsed) {
+      chip?.remove();
+      return;
+    }
 
     const { name, level } = parsed;
-    nameEl.textContent = name;
-    const chip = document.createElement('span');
-    chip.className = `${CHIP_CLASS} ${CHIP_CLASS}--${level}`;
-    chip.textContent = `Lv${level}`;
-    chip.title = `信任等级 ${level}`;
-    nameEl.append(chip);
+    const currentName = [...nameEl.childNodes]
+      .filter((node) => node !== chip)
+      .map((node) => node.textContent || '')
+      .join(' ')
+      .trim();
+    let nextChip = chip;
+    if (currentName !== name) {
+      nameEl.textContent = name;
+      nextChip = null;
+    }
+    if (!nextChip) {
+      nextChip = document.createElement('span');
+      nameEl.append(nextChip);
+    }
+    const chipClass = `${CHIP_CLASS} ${CHIP_CLASS}--${level}`;
+    if (nextChip.className !== chipClass) nextChip.className = chipClass;
+    if (nextChip.textContent !== `Lv${level}`) nextChip.textContent = `Lv${level}`;
+    if (nextChip.title !== `信任等级 ${level}`) nextChip.title = `信任等级 ${level}`;
   }
 
   function enhanceWelfareBadge() {
@@ -1461,6 +1487,9 @@
       if (badge && !badge.classList.contains(WELFARE_BADGE_CLASS)) {
         badge.classList.add(WELFARE_BADGE_CLASS);
       }
+    });
+    document.querySelectorAll('.' + WELFARE_BADGE_CLASS).forEach((badge) => {
+      if (!badge.closest('a.badge-category__wrapper[href*="/c/welfare/"]')) badge.classList.remove(WELFARE_BADGE_CLASS);
     });
   }
 
@@ -1478,11 +1507,17 @@
   function markLonelyTopics() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
       const postersTd = row.querySelector('td.posters');
-      if (!postersTd) return;
+      if (!postersTd) {
+        row.classList.remove(LONELY_CLASS);
+        return;
+      }
       const usernames = [...postersTd.querySelectorAll('a[data-user-card]')]
         .map((a) => a.getAttribute('data-user-card'));
       const unique = [...new Set(usernames)].filter(Boolean);
-      if (unique.length === 0) return;
+      if (unique.length === 0) {
+        row.classList.remove(LONELY_CLASS);
+        return;
+      }
       const isLonely = unique.length === 1;
       if (isLonely) {
         if (!row.classList.contains(LONELY_CLASS)) row.classList.add(LONELY_CLASS);
@@ -1497,13 +1532,25 @@
     const now = Date.now();
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
       const activityTd = row.querySelector('td.activity');
-      if (!activityTd) return;
+      if (!activityTd) {
+        row.classList.remove(STALE_CLASS);
+        return;
+      }
       const created = parseCreatedDate(activityTd.getAttribute('title') || '');
-      if (!created) return;
+      if (!created) {
+        row.classList.remove(STALE_CLASS);
+        return;
+      }
       const m = created.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:\s*(\d{1,2}):(\d{2}))?/);
-      if (!m) return;
+      if (!m) {
+        row.classList.remove(STALE_CLASS);
+        return;
+      }
       const ts = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), m[4] ? Number(m[4]) : 0, m[5] ? Number(m[5]) : 0).getTime();
-      if (isNaN(ts)) return;
+      if (isNaN(ts)) {
+        row.classList.remove(STALE_CLASS);
+        return;
+      }
       const isStale = now - ts > WEEK_MS;
       if (isStale) {
         if (!row.classList.contains(STALE_CLASS)) row.classList.add(STALE_CLASS);
@@ -1546,29 +1593,39 @@
 
   function injectTimes() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
-      if (row.hasAttribute(TIME_DONE)) return;
       const activityTd = row.querySelector('td.activity');
       if (!activityTd) return;
       const created = parseCreatedDate(activityTd.getAttribute('title') || '');
-      if (!created) return;
-      row.setAttribute(TIME_DONE, '');
+      const existing = activityTd.querySelector(':scope > .' + TIME_CLASS);
+      if (!created) {
+        existing?.remove();
+        return;
+      }
       const link = activityTd.querySelector('.post-activity');
-      if (!link) return;
+      if (!link) {
+        existing?.remove();
+        return;
+      }
       const { text, tier } = formatCreated(created);
-      const chip = document.createElement('span');
+      let chip = existing;
+      if (!chip) {
+        chip = document.createElement('span');
+      }
+      if (chip.previousElementSibling !== link) link.insertAdjacentElement('afterend', chip);
       chip.className = tier === 'old' ? TIME_CLASS : `${TIME_CLASS} ${TIME_CLASS}--${tier}`;
       chip.textContent = text;
       chip.title = `发帖于 ${created}`;
-      link.insertAdjacentElement('afterend', chip);
     });
   }
 
   function enhancePosters() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
       const postersTd = row.querySelector('td.posters');
-      if (!postersTd || postersTd.hasAttribute(POSTERS_DONE)) return;
-      postersTd.setAttribute(POSTERS_DONE, '');
+      if (!postersTd) return;
       const imgs = [...postersTd.querySelectorAll('a > img.avatar')];
+      imgs.forEach((img) => {
+        img.classList.remove('ld-tle-op', 'ld-tle-other', 'ld-tle-op--0', 'ld-tle-op--1', 'ld-tle-op--2', 'ld-tle-op--3', 'ld-tle-op--4');
+      });
       if (!imgs.length) return;
       const opImg = imgs.find((img) => /原始发帖人/.test(img.getAttribute('title') || '')) || imgs[0];
       opImg.classList.add('ld-tle-op');
@@ -1608,6 +1665,7 @@
   }
 
   function enhanceOpPosts() {
+    document.querySelectorAll('article[id^="post_"]').forEach((post) => post.classList.remove(OP_POST_CLASS));
     const opId = getOpUserId();
     if (!opId) return;
     document.querySelectorAll('article[id^="post_"]').forEach((post) => {
@@ -1650,22 +1708,30 @@
   }
 
   function processPage() {
-    addStyles();
-    document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
-    enhanceWelfareBadge();
-    weakenPromoRows();
-    markLonelyTopics();
-    markStaleTopics();
-    injectTimes();
-    enhancePosters();
-    enhanceOpPosts();
-    addReplyJumpLinks();
-    applyMarks();
-    ensureFab();
+    mutationObserver?.disconnect();
+    try {
+      addStyles();
+      document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
+      enhanceWelfareBadge();
+      weakenPromoRows();
+      markLonelyTopics();
+      markStaleTopics();
+      injectTimes();
+      enhancePosters();
+      enhanceOpPosts();
+      addReplyJumpLinks();
+      applyMarks();
+      ensureFab();
+    } finally {
+      observeDocument();
+    }
   }
 
   let processingScheduled = false;
   let retryTimer;
+  let scrollRefreshTimer;
+  let mutationRefreshTimer;
+  let mutationObserver;
 
   function scheduleProcessing() {
     if (processingScheduled) return;
@@ -1686,6 +1752,26 @@
       if (index < delays.length) retryTimer = setTimeout(retry, delays[index++]);
     };
     retryTimer = setTimeout(retry, delays[index++]);
+  }
+
+  function scheduleScrollRefresh() {
+    clearTimeout(scrollRefreshTimer);
+    scrollRefreshTimer = setTimeout(processWithRetries, 80);
+    scheduleProcessing();
+  }
+
+  function scheduleMutationRefresh() {
+    scheduleProcessing();
+    clearTimeout(mutationRefreshTimer);
+    mutationRefreshTimer = setTimeout(processWithRetries, 120);
+  }
+
+  function observeDocument() {
+    mutationObserver?.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
   }
 
   function addStyles() {
@@ -2189,11 +2275,18 @@
   addStyles();
   processWithRetries();
 
-  new MutationObserver(scheduleProcessing).observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
+  mutationObserver = new MutationObserver(scheduleMutationRefresh);
+  observeDocument();
+  window.addEventListener('scroll', scheduleScrollRefresh, { passive: true });
+  window.addEventListener('resize', scheduleProcessing, { passive: true });
   window.addEventListener('popstate', scheduleProcessing);
+  document.addEventListener('page:change', processWithRetries);
+  document.addEventListener('page:changed', processWithRetries);
+  document.addEventListener('turbo:load', processWithRetries);
+  window.addEventListener('pageshow', processWithRetries);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') processWithRetries();
+  });
   document.addEventListener('click', (e) => {
     if (pickerEl && !pickerEl.contains(e.target) && !e.target.closest('.' + MARK_ADD)) closePicker();
   });
