@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.42.0
+// @version      0.43.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -190,6 +190,12 @@
     }).filter((effect) => effect && effect.enabled !== false);
   }
 
+  function markEffects(mark) {
+    if (!mark) return [];
+    if (getCat(mark.level)) return boundEffects(mark.level);
+    return boundEffects(mark.effects || mark.effect || mark.level);
+  }
+
   function tagEffects(mark) {
     return normalizeTagIds(mark && mark.tags).map((id) => {
       const tag = getTag(id);
@@ -369,7 +375,7 @@
       const candidates = [];
       if (mark) {
         const group = getCat(mark.level);
-        boundEffects(mark.effects || mark.effect || mark.level).forEach((effect) => candidates.push({ ...effect, priority: group?.priority ?? 10000 }));
+        markEffects(mark).forEach((effect) => candidates.push({ ...effect, priority: group?.priority ?? 10000 }));
       }
       if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: keywordMatch.rule.priority ?? 5000 }));
       reusableEffectForRow(row).forEach((effect) => {
@@ -501,10 +507,10 @@
 
   function paintBadges(host, mark, username) {
     if (!host) return;
-    const markEffects = mark ? [...boundEffects(mark.effects || mark.effect || mark.level), ...tagEffects(mark)] : [];
+    const effects = mark ? [...markEffects(mark), ...tagEffects(mark)] : [];
     const tagIds = [];
     const wanted = [];
-    markEffects.filter((effect) => effect.kind === 'badge').forEach((effect) => {
+    effects.filter((effect) => effect.kind === 'badge').forEach((effect) => {
       wanted.push({ kind: 'effect', id: effect.id, label: effect.label, title: (mark && mark.note) || effect.hint || effect.label });
     });
     tagIds.forEach((id) => {
