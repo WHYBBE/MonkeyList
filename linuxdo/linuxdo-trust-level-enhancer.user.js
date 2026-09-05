@@ -533,8 +533,11 @@
     if (!row) {
       row = document.createElement('div');
       row.className = MARK_ROW;
-      if (anchor) anchor.insertAdjacentElement('afterend', row);
-      else {
+    }
+    if (anchor) {
+      if (row.parentElement !== anchor) anchor.append(row);
+    } else {
+      if (!row.parentElement) {
         const content = card.querySelector('.card-content, .d-user-card__container') || card;
         content.append(row);
       }
@@ -1845,6 +1848,17 @@
         box-sizing: border-box;
       }
       .${MARK_ROW} > .${MARK_BADGE} { margin: 0; }
+      #user-card .${MARK_ROW}, .user-card .${MARK_ROW}, .d-user-card .${MARK_ROW} {
+        margin-top: 10px;
+        gap: 8px;
+      }
+      #user-card .${MARK_BADGE}, .user-card .${MARK_BADGE}, .d-user-card .${MARK_BADGE} {
+        min-height: 28px;
+        padding: 3px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+        line-height: 20px;
+      }
       .${MARK_ADD} {
         display: inline-flex;
         align-items: center;
