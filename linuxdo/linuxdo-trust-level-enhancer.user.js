@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.44.0
+// @version      0.46.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -1060,9 +1060,10 @@
     keywordRules.forEach((rule) => {
       const row = document.createElement('div');
       row.className = 'ld-tle-panel__keyword-row';
-      const word = document.createElement('input');
-      word.type = 'text';
-      word.value = rule.keyword;
+       const word = document.createElement('input');
+       word.type = 'text';
+       word.className = 'ld-tle-panel__keyword-word';
+       word.value = rule.keyword;
        const select = document.createElement('div');
        select.className = 'ld-tle-panel__effect-choices';
        effects.filter((cat) => EFFECT_LIBRARY_IDS.has(cat.id)).forEach((cat) => {
@@ -1074,20 +1075,24 @@
          choice.append(option, document.createTextNode(cat.label));
          select.append(choice);
        });
-      const enabled = document.createElement('input');
-      enabled.type = 'checkbox';
+       const enabled = document.createElement('input');
+       enabled.type = 'checkbox';
+       enabled.className = 'ld-tle-panel__keyword-enabled';
       enabled.checked = rule.enabled;
       enabled.title = '启用规则';
-      const up = document.createElement('button');
-      up.type = 'button';
+       const up = document.createElement('button');
+       up.type = 'button';
+       up.className = 'ld-tle-panel__keyword-up';
       up.textContent = '↑';
       up.title = '提高优先级';
-      const down = document.createElement('button');
-      down.type = 'button';
+       const down = document.createElement('button');
+       down.type = 'button';
+       down.className = 'ld-tle-panel__keyword-down';
       down.textContent = '↓';
       down.title = '降低优先级';
-      const del = document.createElement('button');
-      del.type = 'button';
+       const del = document.createElement('button');
+       del.type = 'button';
+       del.className = 'ld-tle-panel__keyword-delete';
       del.textContent = '删';
       word.addEventListener('change', () => {
         const value = word.value.trim();
@@ -1106,11 +1111,13 @@
        select.addEventListener('change', () => { rule.effectIds = [...select.querySelectorAll('input:checked')].map((option) => option.value); saveKeywordRules(); applyMarks(); });
        const color = document.createElement('input');
        color.type = 'color';
+       color.className = 'ld-tle-panel__keyword-color-input';
        color.value = rule.color || '#0969da';
        color.title = '颜色标记颜色';
        color.addEventListener('change', () => { rule.color = color.value; saveKeywordRules(); applyMarks(); });
        const priority = document.createElement('input');
        priority.type = 'number';
+       priority.className = 'ld-tle-panel__keyword-priority-input';
        priority.value = rule.priority ?? 5000;
        priority.title = '关键词优先级';
        priority.addEventListener('change', () => { rule.priority = Number(priority.value) || 0; saveKeywordRules(); applyMarks(); });
@@ -1895,7 +1902,15 @@
       .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
       .ld-tle-panel__row-tag { padding: 2px 6px; border: 1px solid #d0d7de; border-radius: 999px; background: #fff; color: #57606a; font: 11px/16px ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
       .ld-tle-panel__row-tag.is-on { border-color: #8250df; background: #f3efff; color: #6639b5; }
-      .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) 32px 68px 28px 30px 30px 38px; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+       .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 28px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-word { grid-column: 1; grid-row: 1; min-width: 0; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-priority-input { grid-column: 3; grid-row: 1; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-enabled { grid-column: 4; grid-row: 1; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-up { grid-column: 5; grid-row: 1; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-down { grid-column: 6; grid-row: 1; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-delete { grid-column: 7; grid-row: 1; }
+       .ld-tle-panel__keyword-row > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
@@ -1914,8 +1929,7 @@
          .ld-tle-panel__row-tags, .ld-tle-panel__row input { grid-column: 1 / -1; }
          .ld-tle-panel__cat { grid-template-columns: 1fr 32px 68px 38px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
-         .ld-tle-panel__keyword-row { grid-template-columns: 1fr 28px 28px 28px 34px; gap: 4px; }
-         .ld-tle-panel__keyword-row .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
+          .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 38px; gap: 4px; }
       }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
