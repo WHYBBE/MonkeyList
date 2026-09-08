@@ -245,6 +245,17 @@
     applyMarks();
   }
 
+  function moveCategory(id, direction) {
+    const index = cats.findIndex((cat) => cat.id === id);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= cats.length) return;
+    [cats[index], cats[next]] = [cats[next], cats[index]];
+    saveCats();
+    renderCats();
+    fillCatSelects();
+    applyMarks();
+  }
+
   function normalizeTagIds(list) {
     const seen = new Set();
     const out = [];
@@ -1334,16 +1345,28 @@
        priority.className = 'ld-tle-panel__cat-priority-input';
        priority.value = c.priority ?? 10000;
        priority.title = '分组优先级';
-       const del = document.createElement('button');
-       del.type = 'button';
-       del.className = 'ld-tle-panel__cat-delete';
-      del.textContent = '删';
-      label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
-       effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.querySelectorAll('input:checked')].map((option) => option.value) }));
-       color.addEventListener('change', () => updateGroup(c.id, { color: color.value }));
-       priority.addEventListener('change', () => updateGroup(c.id, { priority: priority.value }));
-      del.addEventListener('click', () => removeCategory(c.id));
-       row.append(label, effect, color, priority, del);
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.className = 'ld-tle-panel__cat-up';
+        up.textContent = '↑';
+        up.title = '上移';
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.className = 'ld-tle-panel__cat-down';
+        down.textContent = '↓';
+        down.title = '下移';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'ld-tle-panel__cat-delete';
+       del.textContent = '删';
+       label.addEventListener('change', () => updateGroup(c.id, { label: label.value }));
+        effect.addEventListener('change', () => updateGroup(c.id, { effectIds: [...effect.querySelectorAll('input:checked')].map((option) => option.value) }));
+        color.addEventListener('change', () => updateGroup(c.id, { color: color.value }));
+        priority.addEventListener('change', () => updateGroup(c.id, { priority: priority.value }));
+        up.addEventListener('click', () => moveCategory(c.id, -1));
+        down.addEventListener('click', () => moveCategory(c.id, 1));
+       del.addEventListener('click', () => removeCategory(c.id));
+        row.append(label, effect, color, priority, up, down, del);
       box.append(row);
     });
   }
@@ -2147,11 +2170,13 @@
       .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
       .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
       .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
-       .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
-       .ld-tle-panel__cat > .ld-tle-panel__cat-label-input { grid-column: 1; grid-row: 1; min-width: 0; }
-       .ld-tle-panel__cat > .ld-tle-panel__cat-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
-       .ld-tle-panel__cat > .ld-tle-panel__cat-priority-input { grid-column: 3; grid-row: 1; }
-       .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 4; grid-row: 1; }
+        .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 30px 30px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-label-input { grid-column: 1; grid-row: 1; min-width: 0; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-priority-input { grid-column: 3; grid-row: 1; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-up { grid-column: 4; grid-row: 1; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-down { grid-column: 5; grid-row: 1; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 6; grid-row: 1; }
        .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
       .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; padding: 5px 6px; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
@@ -2225,7 +2250,7 @@
           .ld-tle-panel__row-tags, .ld-tle-panel__row-note { grid-column: 1 / -1; width: 100%; }
           .ld-tle-panel__row-tags { grid-row: 2; }
           .ld-tle-panel__row-note { grid-row: 3; }
-          .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 38px; gap: 4px; }
+          .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 30px 30px 38px; gap: 4px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
           .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 38px; gap: 4px; }
       }
