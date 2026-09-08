@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.60.0
+// @version      0.61.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.60.0';
+  const SCRIPT_VERSION = '0.61.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -2421,7 +2421,8 @@
   observeDocument();
   window.addEventListener('scroll', scheduleScrollRefresh, { passive: true });
   window.addEventListener('resize', scheduleProcessing, { passive: true });
-  window.addEventListener('popstate', scheduleProcessing);
+  window.addEventListener('popstate', processWithRetries);
+  window.addEventListener('hashchange', processWithRetries);
   document.addEventListener('page:change', processWithRetries);
   document.addEventListener('page:changed', processWithRetries);
   document.addEventListener('turbo:load', processWithRetries);
@@ -2429,6 +2430,9 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') processWithRetries();
   });
+  setInterval(() => {
+    if (document.visibilityState === 'visible') scheduleProcessing();
+  }, 3000);
   document.addEventListener('click', (e) => {
     if (pickerEl && !pickerEl.contains(e.target) && !e.target.closest('.' + MARK_ADD)) closePicker();
   });
