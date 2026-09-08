@@ -743,6 +743,25 @@
     return { added, updated, skipped };
   }
 
+  function resetAllData() {
+    [MARK_KEY, CATS_KEY, TAGS_KEY, KEYWORDS_KEY, EFFECTS_KEY].forEach((key) => localStorage.removeItem(key));
+    cats = loadCats();
+    tags = loadTags();
+    effects = loadEffects();
+    keywordRules = loadKeywordRules();
+    marks = loadMarks();
+    updateMarkStyles();
+    applyMarks();
+    if (panelEl && panelEl.classList.contains('is-open')) {
+      fillCatSelects();
+      renderEffects();
+      renderCats();
+      renderTags();
+      renderKeywords();
+      renderPanelList();
+    }
+  }
+
   function dedupMarks() {
     const seen = new Map();
     let dropped = 0;
@@ -882,6 +901,7 @@
           <button type="button" data-act="import-skip">跳过已有</button>
           <button type="button" data-act="import-replace">覆盖导入</button>
           <button type="button" data-act="dedup">去重</button>
+          <button type="button" data-act="reset-all" class="ld-tle-panel__danger">彻底清理数据</button>
         </div>
       </section>
       <div class="ld-tle-panel__msg" aria-live="polite"></div>
@@ -906,6 +926,13 @@
       const n = dedupMarks();
       renderPanelList();
       showPanelMsg(n ? `合并了 ${n} 条重复` : '没有重复项');
+    });
+    panelEl.querySelector('[data-act="reset-all"]').addEventListener('click', () => {
+      if (!confirm('彻底清理将删除全部效果、分组、关键词规则和用户标记，并恢复内置默认配置，此操作不可撤销。建议先导出备份。确定继续？')) return;
+      resetAllData();
+      const ta = panelEl.querySelector('.ld-tle-panel__json');
+      if (ta) ta.value = '';
+      showPanelMsg('已彻底清理，恢复默认配置');
     });
     panelEl.querySelector('[data-act="add"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__user');
@@ -2179,7 +2206,9 @@
       .ld-tle-panel__btns { padding-top: 8px; border-top: 1px solid #eaeef2; }
        .ld-tle-panel__btns button, .ld-tle-panel__row button { padding: 6px 9px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; cursor: pointer; }
        .ld-tle-panel__btns button:first-child { border-color: #0969da; color: #0969da; font-weight: 700; }
-       .ld-tle-panel__btns button:hover, .ld-tle-panel__row button:hover { background: #f6f8fa; }
+        .ld-tle-panel__btns button:hover, .ld-tle-panel__row button:hover { background: #f6f8fa; }
+        .ld-tle-panel__btns button.ld-tle-panel__danger { border-color: #cf222e; color: #cf222e; font-weight: 700; }
+        .ld-tle-panel__btns button.ld-tle-panel__danger:hover { background: #ffebe9; }
        .ld-tle-panel__row .ld-tle-panel__row-group-tag { padding: 3px 9px; border: 1px solid #8250df; border-radius: 6px 0 0 6px; background: #f3efff; color: #6639b5; font: 600 12px/18px ui-sans-serif, system-ui, sans-serif; }
        .ld-tle-panel__row .ld-tle-panel__row-group-remove { padding: 0 !important; border: 1px solid #d0d7de; border-left: 0; border-radius: 0 6px 6px 0; background: #f6f8fa; color: #8b949e; }
       .ld-tle-panel__msg { min-height: 1.2em; color: #57606a; font-size: 12px; }
