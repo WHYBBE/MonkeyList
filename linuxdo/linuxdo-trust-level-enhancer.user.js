@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.58.0
+// @version      0.60.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.58.0';
+  const SCRIPT_VERSION = '0.60.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -253,6 +253,43 @@
     saveCats();
     renderCats();
     fillCatSelects();
+    applyMarks();
+  }
+
+  function duplicateCategory(id) {
+    const index = cats.findIndex((cat) => cat.id === id);
+    if (index < 0) return;
+    const src = cats[index];
+    const cat = normalizeCat({
+      id: uniqueId(src.id, (value) => !!getCat(value)),
+      label: `${src.label} 副本`,
+      color: src.color,
+      priority: src.priority,
+      hint: src.hint,
+      effectIds: [...(src.effectIds || [])],
+    });
+    if (!cat) return;
+    cats.splice(index + 1, 0, cat);
+    saveCats();
+    renderCats();
+    fillCatSelects();
+    applyMarks();
+  }
+
+  function duplicateKeywordRule(id) {
+    const index = keywordRules.findIndex((rule) => rule.id === id);
+    if (index < 0) return;
+    const src = keywordRules[index];
+    keywordRules.splice(index + 1, 0, {
+      id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      keyword: src.keyword,
+      effectIds: [...(src.effectIds || [])],
+      color: src.color,
+      priority: src.priority,
+      enabled: src.enabled,
+    });
+    saveKeywordRules();
+    renderKeywords();
     applyMarks();
   }
 
@@ -1227,10 +1264,16 @@
        priority.title = '关键词优先级';
        priority.addEventListener('change', () => { rule.priority = Number(priority.value) || 0; saveKeywordRules(); applyMarks(); });
       enabled.addEventListener('change', () => { rule.enabled = enabled.checked; saveKeywordRules(); applyMarks(); });
-      up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
-      down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
-      del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
-       row.append(word, select, color, priority, enabled, up, down, del);
+       up.addEventListener('click', () => moveKeywordRule(rule.id, -1));
+       down.addEventListener('click', () => moveKeywordRule(rule.id, 1));
+       const dup = document.createElement('button');
+       dup.type = 'button';
+       dup.className = 'ld-tle-panel__keyword-copy';
+       dup.textContent = '复';
+       dup.title = '复制规则';
+       dup.addEventListener('click', () => duplicateKeywordRule(rule.id));
+       del.addEventListener('click', () => { keywordRules = keywordRules.filter((r) => r.id !== rule.id); saveKeywordRules(); renderKeywords(); applyMarks(); });
+        row.append(word, select, color, priority, enabled, up, down, dup, del);
       box.append(row);
     });
   }
@@ -1355,6 +1398,11 @@
         down.className = 'ld-tle-panel__cat-down';
         down.textContent = '↓';
         down.title = '下移';
+        const dup = document.createElement('button');
+        dup.type = 'button';
+        dup.className = 'ld-tle-panel__cat-copy';
+        dup.textContent = '复';
+        dup.title = '复制分组';
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'ld-tle-panel__cat-delete';
@@ -1365,8 +1413,9 @@
         priority.addEventListener('change', () => updateGroup(c.id, { priority: priority.value }));
         up.addEventListener('click', () => moveCategory(c.id, -1));
         down.addEventListener('click', () => moveCategory(c.id, 1));
+        dup.addEventListener('click', () => duplicateCategory(c.id));
        del.addEventListener('click', () => removeCategory(c.id));
-        row.append(label, effect, color, priority, up, down, del);
+        row.append(label, effect, color, priority, up, down, dup, del);
       box.append(row);
     });
   }
@@ -2170,13 +2219,14 @@
       .ld-tle-panel__effect-choices label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #d0d7de; border-radius: 6px; background: #f8fafc; cursor: pointer; }
       .ld-tle-panel__effect-choices label:has(input:checked) { border-color: #0969da; background: #eaf3ff; color: #0969da; }
       .ld-tle-panel__cat-effect, .ld-tle-panel__keyword-cat { min-height: 34px; }
-        .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 30px 30px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
+        .ld-tle-panel__cat { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 7px; align-items: center; padding: 7px 0; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-label-input { grid-column: 1; grid-row: 1; min-width: 0; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-priority-input { grid-column: 3; grid-row: 1; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-up { grid-column: 4; grid-row: 1; }
         .ld-tle-panel__cat > .ld-tle-panel__cat-down { grid-column: 5; grid-row: 1; }
-        .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 6; grid-row: 1; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-copy { grid-column: 6; grid-row: 1; }
+        .ld-tle-panel__cat > .ld-tle-panel__cat-delete { grid-column: 7; grid-row: 1; }
        .ld-tle-panel__cat > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
       .ld-tle-panel__cat input[type="number"], .ld-tle-panel__builtin-row input[type="number"], .ld-tle-panel__keyword-row input[type="number"] { width: 68px; box-sizing: border-box; padding: 5px 6px; }
       .ld-tle-panel__tags .ld-tle-panel__cat { grid-template-columns: 32px 1fr auto; }
@@ -2217,14 +2267,15 @@
        .ld-tle-panel__row-tag-picker-break { flex-basis: 100%; width: 0; height: 0; }
        .ld-tle-panel__row-tag-add { border-style: dashed; color: #0969da; }
         .ld-tle-panel__row-tag-picker { width: min(240px, 100%); max-width: 100%; min-width: 0; padding: 3px 5px; box-sizing: border-box; }
-       .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 28px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-word { grid-column: 1; grid-row: 1; min-width: 0; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-priority-input { grid-column: 3; grid-row: 1; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-enabled { grid-column: 4; grid-row: 1; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-up { grid-column: 5; grid-row: 1; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-down { grid-column: 6; grid-row: 1; }
-       .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-delete { grid-column: 7; grid-row: 1; }
+        .ld-tle-panel__keyword-row { display: grid; grid-template-columns: minmax(100px, 1fr) 32px 68px 28px 30px 30px 30px 38px; grid-template-rows: auto auto; gap: 6px; align-items: center; padding: 8px 5px; border-bottom: 1px solid #f0f2f4; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-word { grid-column: 1; grid-row: 1; min-width: 0; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-color-input { grid-column: 2; grid-row: 1; width: 32px; height: 28px; padding: 0; border: 0; background: transparent; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-priority-input { grid-column: 3; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-enabled { grid-column: 4; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-up { grid-column: 5; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-down { grid-column: 6; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-copy { grid-column: 7; grid-row: 1; }
+        .ld-tle-panel__keyword-row > .ld-tle-panel__keyword-delete { grid-column: 8; grid-row: 1; }
        .ld-tle-panel__keyword-row > .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; width: 100%; }
       .ld-tle-panel__keywords { margin-bottom: 10px; border-top: 1px solid #eaeef2; }
       .ld-tle-panel__json { width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; border-radius: 8px !important; line-height: 1.5; resize: vertical; }
@@ -2250,9 +2301,9 @@
           .ld-tle-panel__row-tags, .ld-tle-panel__row-note { grid-column: 1 / -1; width: 100%; }
           .ld-tle-panel__row-tags { grid-row: 2; }
           .ld-tle-panel__row-note { grid-row: 3; }
-          .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 30px 30px 38px; gap: 4px; }
+          .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 30px 30px 30px 38px; gap: 4px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
-          .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 38px; gap: 4px; }
+          .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 30px 38px; gap: 4px; }
       }
       @media (prefers-color-scheme: dark) {
         .${CHIP_CLASS}--0 { color: #f0f6fc; background: #6e7681; }
