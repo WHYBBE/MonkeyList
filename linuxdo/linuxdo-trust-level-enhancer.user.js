@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.62.0
+// @version      0.63.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.62.0';
+  const SCRIPT_VERSION = '0.63.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -356,6 +356,7 @@
     }
     saveMarks();
     applyMarks();
+    fillCatSelects();
     if (!opts || !opts.keepPanel) {
       if (panelEl && panelEl.classList.contains('is-open')) renderPanelList();
     }
@@ -368,6 +369,7 @@
     marks[user] = { groups: normalized, note: String(note || ''), at: Date.now() };
     saveMarks();
     applyMarks();
+    fillCatSelects();
   }
 
   function normalizeTagReasons(reasons, tagIds) {
@@ -1126,7 +1128,9 @@
     const keywordSel = panelEl.querySelector('.ld-tle-panel__keyword-cat');
     const groupSel = panelEl.querySelector('.ld-tle-panel__cat-effect');
     const keepFilter = filter.value;
-    filter.innerHTML = '<option value="">全部效果</option>';
+    const markValues = Object.values(marks);
+    const groupCounts = new Map(cats.map((c) => [c.id, markValues.filter((mark) => (mark.groups || []).some((group) => group.id === c.id)).length]));
+    filter.innerHTML = `<option value="">全部效果（${markValues.length}）</option>`;
     addSel.innerHTML = '';
     if (keywordSel) keywordSel.innerHTML = '';
     if (groupSel) groupSel.innerHTML = '';
@@ -1134,7 +1138,10 @@
       const a = document.createElement('option');
       a.value = c.id;
       a.textContent = c.label;
-      filter.append(a.cloneNode(true));
+      const f = document.createElement('option');
+      f.value = c.id;
+      f.textContent = `${c.label}（${groupCounts.get(c.id) || 0}）`;
+      filter.append(f);
       addSel.append(a);
     });
     effects.filter((c) => EFFECT_LIBRARY_IDS.has(c.id)).forEach((c) => {
