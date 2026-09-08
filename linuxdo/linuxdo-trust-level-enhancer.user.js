@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.61.0
+// @version      0.62.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.61.0';
+  const SCRIPT_VERSION = '0.62.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -1467,12 +1467,10 @@
       row.innerHTML = `
         <a href="/u/${encodeURIComponent(user)}" target="_blank" rel="noopener">@${user}</a>
         <div class="ld-tle-panel__row-tags"></div>
-        <input type="text" class="ld-tle-panel__row-note" placeholder="备注" value="">
         <button type="button" data-act="del">删</button>
       `;
-      const note = row.querySelector('input');
-      note.value = info.note || '';
        const tagBox = row.querySelector('.ld-tle-panel__row-tags');
+       const noteValue = info.note || '';
        const selectedGroups = info.groups || [];
        const selectedGroupIds = new Set(selectedGroups.map((group) => group.id));
        selectedGroups.forEach((binding) => {
@@ -1489,24 +1487,24 @@
             const reason = window.prompt(`编辑「${group.label}」的绑定原因`, binding.reason || '');
            if (reason == null) return;
            const nextGroups = selectedGroups.map((item) => item.id === group.id ? { ...item, reason } : item);
-             setMarkGroups(user, nextGroups, note.value);
-           renderPanelList();
-         });
-         const remove = document.createElement('button');
-         remove.type = 'button';
-         remove.className = 'ld-tle-panel__row-group-remove';
-         remove.textContent = '×';
-         remove.title = `移除「${group.label}」分组标签`;
-         remove.setAttribute('aria-label', remove.title);
-         remove.addEventListener('click', () => {
-           const nextGroups = selectedGroups.filter((item) => item.id !== group.id);
-           if (!nextGroups.length) {
-             setMark(user, null);
-           } else {
-             setMarkGroups(user, nextGroups, note.value);
-           }
-           renderPanelList();
-         });
+             setMarkGroups(user, nextGroups, noteValue);
+            renderPanelList();
+          });
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'ld-tle-panel__row-group-remove';
+          remove.textContent = '×';
+          remove.title = `移除「${group.label}」分组标签`;
+          remove.setAttribute('aria-label', remove.title);
+          remove.addEventListener('click', () => {
+            const nextGroups = selectedGroups.filter((item) => item.id !== group.id);
+            if (!nextGroups.length) {
+              setMark(user, null);
+            } else {
+              setMarkGroups(user, nextGroups, noteValue);
+            }
+            renderPanelList();
+          });
           tagWrap.append(tagButton, remove);
           tagBox.append(tagWrap);
         });
@@ -1530,14 +1528,13 @@
        picker.addEventListener('change', () => {
            const group = getCat(picker.value);
            if (!group) return;
-            const reason = window.prompt(`请输入「${group.label}」的绑定备注`, '');
-            const nextGroups = [...selectedGroups, { id: group.id, reason: reason || '' }];
-            setMarkGroups(user, nextGroups, note.value);
-           renderPanelList();
-       });
-       tagBox.append(picker);
-         note.addEventListener('change', () => setMarkGroups(user, selectedGroups, note.value));
-      row.querySelector('[data-act="del"]').addEventListener('click', () => {
+             const reason = window.prompt(`请输入「${group.label}」的绑定备注`, '');
+             const nextGroups = [...selectedGroups, { id: group.id, reason: reason || '' }];
+             setMarkGroups(user, nextGroups, noteValue);
+            renderPanelList();
+        });
+        tagBox.append(picker);
+       row.querySelector('[data-act="del"]').addEventListener('click', () => {
         setMark(user, null);
         renderPanelList();
       });
@@ -2250,10 +2247,10 @@
       .ld-tle-panel__add button:hover, .ld-tle-panel__cat-add button:hover, .ld-tle-panel__tag-add button:hover { background: #0757b8 !important; }
       .ld-tle-panel input:focus, .ld-tle-panel select:focus, .ld-tle-panel textarea:focus { outline: 2px solid rgba(9,105,218,.25); border-color: #0969da; }
        .ld-tle-panel__list { max-height: 390px; min-width: 0; overflow-x: hidden; overflow-y: auto; margin: 10px 0 12px; padding: 2px 4px; border-top: 1px solid #eaeef2; }
-       .ld-tle-panel__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(90px, 1fr) 38px; gap: 7px; align-items: center; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
+       .ld-tle-panel__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) 38px; gap: 7px; align-items: center; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 5px; border-bottom: 1px solid #f0f2f4; }
       .ld-tle-panel__row:hover { border-radius: 6px; background: #f8fafc; }
       .ld-tle-panel__row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-       .ld-tle-panel__row > select, .ld-tle-panel__row-note { width: 100%; min-width: 0; box-sizing: border-box; }
+       .ld-tle-panel__row > select { width: 100%; min-width: 0; box-sizing: border-box; }
         .ld-tle-panel__row-tags { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: 5px; width: 100%; max-width: 100%; min-width: 0; overflow: visible; box-sizing: border-box; }
        .ld-tle-panel__row-tags-label, .ld-tle-panel__row-tags-empty { color: #8b949e; font-size: 11px; }
        .ld-tle-panel__row-tags-label { margin-right: 2px; }
@@ -2298,9 +2295,8 @@
           .ld-tle-panel__row { grid-template-columns: minmax(0, 1fr) 38px; gap: 5px; }
           .ld-tle-panel__row > a { grid-column: 1; min-width: 0; }
           .ld-tle-panel__row > [data-act="del"] { grid-column: 2; grid-row: 1; }
-          .ld-tle-panel__row-tags, .ld-tle-panel__row-note { grid-column: 1 / -1; width: 100%; }
+          .ld-tle-panel__row-tags { grid-column: 1 / -1; width: 100%; }
           .ld-tle-panel__row-tags { grid-row: 2; }
-          .ld-tle-panel__row-note { grid-row: 3; }
           .ld-tle-panel__cat { grid-template-columns: minmax(0, 1fr) 32px 68px 30px 30px 30px 38px; gap: 4px; }
          .ld-tle-panel__cat .ld-tle-panel__effect-choices { grid-column: 1 / -1; grid-row: 2; }
           .ld-tle-panel__keyword-row { grid-template-columns: minmax(0, 1fr) 32px 68px 28px 30px 30px 30px 38px; gap: 4px; }
