@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.63.0
+// @version      0.64.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.63.0';
+  const SCRIPT_VERSION = '0.64.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -395,14 +395,15 @@
       .map(([id, reason]) => [id, String(reason).trim()]));
   }
 
-  function normalizeMarkGroups(groups) {
+  function normalizeMarkGroups(groups, availableCatIds) {
     const seen = new Set();
+    const available = availableCatIds ? new Set(availableCatIds) : null;
     return (Array.isArray(groups) ? groups : []).map((group) => {
       const id = typeof group === 'string' ? group : group && group.id;
       const reason = typeof group === 'object' && group ? group.reason : '';
       return { id: String(id || ''), reason: String(reason || '').trim() };
     }).filter((group) => {
-      if (!getCat(group.id) || seen.has(group.id)) return false;
+      if ((available ? !available.has(group.id) : !getCat(group.id)) || seen.has(group.id)) return false;
       seen.add(group.id);
       return true;
     });
@@ -721,34 +722,50 @@
 
   function parseImport(text) {
     const data = JSON.parse(text);
-    if (!data || typeof data !== 'object' || Array.isArray(data) || !data.marks || typeof data.marks !== 'object' || Array.isArray(data.marks)) throw new Error('Invalid export');
-    const entries = Object.entries(data.marks).map(([username, value]) => ({ username, ...value }));
-    const parsed = [];
-    for (const item of entries) {
-      const username = String(item.username || '').trim().toLowerCase();
-      const groups = normalizeMarkGroups(item.groups);
-      if (!username || !groups.length) continue;
-      parsed.push({
-        username,
-        groups,
-        note: item.note || '',
-        at: item.at || Date.now(),
-      });
-    }
-    const importedEffects = Array.isArray(data && data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
-    const importedCats = Array.isArray(data && data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
-    const importedRules = Array.isArray(data && data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && Array.isArray(r.effectIds)).map((r) => ({
+    if (!data || typeof data !== 'object') throw new Error('Invalid export');
+    const importedEffects = Array.isArray(data.effects) ? data.effects.map(normalizeEffect).filter(Boolean) : [];
+    const importedCats = Array.isArray(data.cats) ? data.cats.map(normalizeCat).filter(Boolean) : [];
+    const importedTags = Array.isArray(data.tags) ? data.tags.map(normalizeTag).filter(Boolean) : [];
+    const importedEffectIds = new Set([...effects, ...importedEffects].map((effect) => effect.id));
+    const importedRules = Array.isArray(data.keywordRules) ? data.keywordRules.filter((r) => r && r.keyword && Array.isArray(r.effectIds)).map((r) => ({
        id: String(r.id || `rule-${Date.now()}-${Math.random()}`),
        keyword: String(r.keyword).trim(),
-       effectIds: libraryEffectIds(r.effectIds).filter((id) => getEffect(id)),
+       effectIds: libraryEffectIds(r.effectIds).filter((id) => importedEffectIds.has(id)),
        color: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(r.color || '') ? r.color : '#0969da',
        priority: Number.isFinite(Number(r.priority)) ? Number(r.priority) : 5000,
        enabled: r.enabled !== false,
      })) : [];
-    return { parsed, importedEffects, importedCats, importedRules };
+    let source = data;
+    if (!Array.isArray(data) && data.marks && typeof data.marks === 'object' && !Array.isArray(data.marks)) source = data.marks;
+    if (!source || typeof source !== 'object') throw new Error('Invalid export');
+    const entries = Array.isArray(source)
+      ? source
+      : Object.entries(source).map(([username, value]) => ({
+        username,
+        ...(value && typeof value === 'object' ? value : { level: value }),
+      }));
+    const availableCatIds = new Set([...cats, ...importedCats].map((cat) => cat.id));
+    const parsed = [];
+    for (const item of entries) {
+      const record = item && typeof item === 'object' ? item : {};
+      const username = String(record.username || record.user || record.name || '').trim().toLowerCase();
+      const legacyLevel = record.level || record.effect || record.mark || record.tag;
+      const rawGroups = Array.isArray(record.groups)
+        ? record.groups
+        : legacyLevel ? [{ id: legacyLevel, reason: '' }] : [];
+      const groups = normalizeMarkGroups(rawGroups, availableCatIds);
+      if (!username || !groups.length) continue;
+      parsed.push({
+        username,
+        groups,
+        note: record.note || '',
+        at: record.at || Date.now(),
+      });
+    }
+    return { parsed, importedEffects, importedCats, importedTags, importedRules };
   }
 
-  function mergeImported(parsed, importedEffects, importedCats, importedRules, mode) {
+  function mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode) {
     let added = 0;
     let updated = 0;
     let skipped = 0;
@@ -759,6 +776,9 @@
     });
     importedCats.forEach((cat) => {
       if (!getCat(cat.id)) cats.push(cat);
+    });
+    importedTags.forEach((tag) => {
+      if (!getTag(tag.id)) tags.push(tag);
     });
     importedRules.forEach((rule) => {
       if (!keywordRules.some((r) => r.keyword.toLowerCase() === rule.keyword.toLowerCase())) keywordRules.push(rule);
@@ -783,7 +803,7 @@
       updated++;
     }
     saveCats();
-      saveEffects();
+    saveEffects();
     fillCatSelects();
     saveTags();
     saveKeywordRules();
@@ -1430,13 +1450,16 @@
   function runImport(mode) {
     const ta = panelEl.querySelector('.ld-tle-panel__json');
     try {
-      const { parsed, importedEffects, importedCats, importedRules } = parseImport(ta.value);
-      if (!parsed.length) { showPanelMsg('没有可导入的标记'); return; }
-      const r = mergeImported(parsed, importedEffects, importedCats, importedRules, mode);
+      const { parsed, importedEffects, importedCats, importedTags, importedRules } = parseImport(ta.value);
+      if (!parsed.length && !importedEffects.length && !importedCats.length && !importedTags.length && !importedRules.length) {
+        showPanelMsg('没有可导入的数据');
+        return;
+      }
+      const r = mergeImported(parsed, importedEffects, importedCats, importedTags, importedRules, mode);
       renderPanelList();
       showPanelMsg(`新增 ${r.added}，更新 ${r.updated}，跳过 ${r.skipped}`);
     } catch (e) {
-      showPanelMsg('JSON 无法解析');
+      showPanelMsg(e && e.message === 'Invalid export' ? '不是有效的脚本备份数据' : 'JSON 无法解析');
     }
   }
 
