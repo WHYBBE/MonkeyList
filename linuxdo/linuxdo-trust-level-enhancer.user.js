@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.64.0
+// @version      0.65.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.64.0';
+  const SCRIPT_VERSION = '0.65.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -97,9 +97,10 @@
 
   function loadCats() {
     try {
-      const raw = JSON.parse(localStorage.getItem(CATS_KEY) || 'null');
-      const list = Array.isArray(raw) ? raw.map(normalizeCat).filter(Boolean) : [];
-      return list.length ? list : DEFAULT_CATS.map((c) => ({ ...c }));
+      const stored = localStorage.getItem(CATS_KEY);
+      if (stored == null) return DEFAULT_CATS.map((c) => ({ ...c }));
+      const raw = JSON.parse(stored);
+      return Array.isArray(raw) ? raw.map(normalizeCat).filter(Boolean) : DEFAULT_CATS.map((c) => ({ ...c }));
     } catch (e) {
       return DEFAULT_CATS.map((c) => ({ ...c }));
     }
@@ -815,11 +816,16 @@
 
   function resetAllData() {
     [MARK_KEY, CATS_KEY, TAGS_KEY, KEYWORDS_KEY, EFFECTS_KEY].forEach((key) => localStorage.removeItem(key));
-    cats = loadCats();
+    cats = [];
     tags = loadTags();
     effects = loadEffects();
-    keywordRules = loadKeywordRules();
+    keywordRules = [];
     marks = loadMarks();
+    saveCats();
+    saveTags();
+    saveEffects();
+    saveKeywordRules();
+    saveMarks();
     updateMarkStyles();
     applyMarks();
     if (panelEl && panelEl.classList.contains('is-open')) {
@@ -998,11 +1004,11 @@
       showPanelMsg(n ? `合并了 ${n} 条重复` : '没有重复项');
     });
     panelEl.querySelector('[data-act="reset-all"]').addEventListener('click', () => {
-      if (!confirm('彻底清理将删除全部效果、分组、关键词规则和用户标记，并恢复内置默认配置，此操作不可撤销。建议先导出备份。确定继续？')) return;
+      if (!confirm('彻底清理将删除全部效果、分组、关键词规则和用户标记。分组和关键词将保持为空，此操作不可撤销。建议先导出备份。确定继续？')) return;
       resetAllData();
       const ta = panelEl.querySelector('.ld-tle-panel__json');
       if (ta) ta.value = '';
-      showPanelMsg('已彻底清理，恢复默认配置');
+      showPanelMsg('已彻底清理，分组和关键词为空');
     });
     panelEl.querySelector('[data-act="add"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__user');
