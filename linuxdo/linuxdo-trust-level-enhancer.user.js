@@ -28,6 +28,7 @@
   const TAGS_KEY = 'ld-tle-mark-tags';
   const KEYWORDS_KEY = 'ld-tle-keyword-rules';
   const EFFECTS_KEY = 'ld-tle-topic-effects';
+  const DEBUG_KEY = 'ld-tle-debug';
   const MARK_STYLE_ID = 'ld-tle-mark-dyn';
   const MARK_CLASS = 'ld-tle-mark';
   const EFFECT_CLASS = 'ld-tle-effect';
@@ -171,7 +172,7 @@
     const groupIds = (mark.groups || []).map((group) => group.id);
     return groupIds.flatMap((id) => {
       const group = getCat(id);
-      return group ? boundEffects(group.effectIds).map((effect) => ({ ...effect, priority: group.priority })) : [];
+      return group ? boundEffects(group.effectIds).map((effect) => ({ ...effect, priority: group.priority, source: group.label })) : [];
     });
   }
 
@@ -453,11 +454,12 @@
       if (mark) {
         markEffects(mark).forEach((effect) => candidates.push(effect));
       }
-      if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: keywordMatch.rule.priority ?? 5000 }));
+      if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: keywordMatch.rule.priority ?? 5000, source: `关键词·${keywordMatch.rule.keyword}` }));
       reusableEffectForRow(row).forEach((effect) => {
         if (effect) candidates.push({ ...effect, priority: effect.priority || 0 });
       });
-      applyTopicEffects(row, candidates);
+      const result = applyTopicEffects(row, candidates);
+      row.__ldTleDebug = { candidates, applied: result.applied, colorWinner: result.colorWinner, tagWinner: result.tagWinner };
       const title = row.querySelector('.link-top-line, td.main-link');
       title?.querySelectorAll('.ld-tle-keyword-badge').forEach((el) => el.remove());
       paintBadges(title, mark, null);
@@ -513,27 +515,33 @@
 
   function reusableEffectForRow(row) {
     const result = [];
-    if (row.classList.contains(PROMO_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
-    if (row.classList.contains(LOTTERY_CLASS)) result.push(getEffect('fade-light'), getEffect('strike'));
-    if (row.classList.contains(STALE_CLASS)) result.push(getEffect('fade-light'));
+    const pushReuse = (effect, source) => {
+      if (effect) result.push({ ...effect, source });
+    };
+    if (row.classList.contains(PROMO_CLASS)) { pushReuse(getEffect('fade-light'), '内置·推广'); pushReuse(getEffect('strike'), '内置·推广'); }
+    if (row.classList.contains(LOTTERY_CLASS)) { pushReuse(getEffect('fade-light'), '内置·抽奖'); pushReuse(getEffect('strike'), '内置·抽奖'); }
+    if (row.classList.contains(STALE_CLASS)) pushReuse(getEffect('fade-light'), '内置·陈旧');
     if (row.classList.contains(LONELY_CLASS)) {
       const lonely = getEffect('lonely');
-      if (lonely) result.push({ ...lonely, priority: lonely.priority });
+      if (lonely) result.push({ ...lonely, priority: lonely.priority, source: '内置·待回复' });
     }
       if (row.querySelector('.' + WELFARE_BADGE_CLASS)) {
         const welfare = getEffect('welfare');
         const tagHighlight = getEffect('tag-highlight');
-      if (welfare?.enabled !== false && tagHighlight) result.push({ ...tagHighlight, color: welfare.color, priority: welfare.priority, welfareOnly: true });
+      if (welfare?.enabled !== false && tagHighlight) result.push({ ...tagHighlight, color: welfare.color, priority: welfare.priority, welfareOnly: true, source: '内置·福利' });
     }
     const categoryText = row.querySelector('.badge-category__name')?.textContent || '';
     if (/富可敌国/.test(categoryText)) {
       const rich = getEffect('rich');
       if (rich?.enabled !== false) {
-        result.push({ ...getEffect('fade-deep'), priority: rich.priority }, { ...getEffect('strike'), priority: rich.priority });
+        const fadeDeep = getEffect('fade-deep');
+        const strikeEffect = getEffect('strike');
+        if (fadeDeep) result.push({ ...fadeDeep, priority: rich.priority, source: '内置·富可敌国' });
+        if (strikeEffect) result.push({ ...strikeEffect, priority: rich.priority, source: '内置·富可敌国' });
       }
     }
     const levelClass = [...row.querySelectorAll('td.main-link')].flatMap((td) => [...td.classList]).find((name) => /^ld-tle-row--[1-4]$/.test(name));
-    if (levelClass) result.push(getEffect(levelClass.replace('ld-tle-row--', 'lv')));
+    if (levelClass) pushReuse(getEffect(levelClass.replace('ld-tle-row--', 'lv')), '内置·等级');
     return result.filter(Boolean);
   }
 
@@ -548,19 +556,22 @@
       .sort((a, b) => (b.priority || 0) - (a.priority || 0));
     const exclusiveKinds = new Set(['color', 'tag', 'fade']);
     const selectedKinds = new Set();
+    let colorWinner = null;
+    let tagWinner = null;
     activeEffects.filter((effect) => !exclusiveKinds.has(effect.kind) || !selectedKinds.has(effect.kind)).forEach((effect) => {
       if (exclusiveKinds.has(effect.kind)) selectedKinds.add(effect.kind);
-      if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) row.style.setProperty('--ld-tle-effect-color', effect.color);
+      if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) { row.style.setProperty('--ld-tle-effect-color', effect.color); colorWinner = effect; }
       if (effect.kind === 'tag') {
         row.classList.add(`${EFFECT_CLASS}--tag-highlight`);
         if (effect.welfareOnly) row.classList.add('ld-tle-welfare-only');
-        if (!row.style.getPropertyValue('--ld-tle-tag-color')) row.style.setProperty('--ld-tle-tag-color', effect.color);
+        if (!row.style.getPropertyValue('--ld-tle-tag-color')) { row.style.setProperty('--ld-tle-tag-color', effect.color); tagWinner = effect; }
       }
       if (!seen.has(effect.id)) {
         seen.add(effect.id);
         row.classList.add(`${EFFECT_CLASS}--${effect.id}`);
       }
     });
+    return { applied: activeEffects, colorWinner, tagWinner };
   }
 
   function setEffectBadge(host, effect, keyword) {
@@ -815,7 +826,7 @@
   }
 
   function resetAllData() {
-    [MARK_KEY, CATS_KEY, TAGS_KEY, KEYWORDS_KEY, EFFECTS_KEY].forEach((key) => localStorage.removeItem(key));
+    [MARK_KEY, CATS_KEY, TAGS_KEY, KEYWORDS_KEY, EFFECTS_KEY, DEBUG_KEY].forEach((key) => localStorage.removeItem(key));
     cats = [];
     tags = loadTags();
     effects = loadEffects();
@@ -979,6 +990,8 @@
           <button type="button" data-act="dedup">去重</button>
           <button type="button" data-act="reset-all" class="ld-tle-panel__danger">彻底清理数据</button>
         </div>
+        <div class="ld-tle-panel__section-head"><div><strong>调试</strong><span>开启后悬浮时间标签可查看优先级应用关系</span></div></div>
+        <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__debug"> 启用调试模式</label>
       </section>
       <div class="ld-tle-panel__msg" aria-live="polite"></div>
     `;
@@ -1008,7 +1021,13 @@
       resetAllData();
       const ta = panelEl.querySelector('.ld-tle-panel__json');
       if (ta) ta.value = '';
-      showPanelMsg('已彻底清理，分组和关键词为空');
+      showPanelMsg('已彻底清理，恢复默认配置');
+    });
+    const debugToggle = panelEl.querySelector('.ld-tle-panel__debug');
+    debugToggle.checked = isDebugMode();
+    debugToggle.addEventListener('change', () => {
+      setDebugMode(debugToggle.checked);
+      processWithRetries();
     });
     panelEl.querySelector('[data-act="add"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__user');
@@ -1749,6 +1768,36 @@
       : { text: `${d.getFullYear()}-${md}`, tier: 'old' };
   }
 
+  function isDebugMode() {
+    try { return localStorage.getItem(DEBUG_KEY) === '1'; } catch (e) { return false; }
+  }
+
+  function setDebugMode(on) {
+    try {
+      if (on) localStorage.setItem(DEBUG_KEY, '1');
+      else localStorage.removeItem(DEBUG_KEY);
+    } catch (e) { /* ignore */ }
+  }
+
+  function debugPriorityTitle(row, created) {
+    const lines = [`发帖于 ${created}`, '── 优先级应用关系 ──'];
+    const info = row && row.__ldTleDebug;
+    const candidates = (info && info.candidates) || [];
+    if (!candidates.length) return `${lines[0]}\n无候选效果`;
+    const colorWinnerId = info.colorWinner ? `${info.colorWinner.id}:${info.colorWinner.kind}` : null;
+    const tagWinnerId = info.tagWinner ? `${info.tagWinner.id}:${info.tagWinner.kind}` : null;
+    (info.applied || []).forEach((effect) => {
+      const notes = [];
+      if (`${effect.id}:${effect.kind}` === colorWinnerId) notes.push('行颜色');
+      if (`${effect.id}:${effect.kind}` === tagWinnerId) notes.push('tag颜色');
+      lines.push(`[${effect.priority ?? 0}] ${effect.source || '未知来源'} → ${effect.label}（${effect.kind}）${notes.length ? ` ★${notes.join('+')}` : ''}`);
+    });
+    candidates.filter((effect) => effect && effect.enabled === false).forEach((effect) => {
+      lines.push(`[${effect.priority ?? 0}] ${effect.source || '未知来源'} → ${effect.label}（${effect.kind}）✗已禁用`);
+    });
+    return lines.join('\n');
+  }
+
   function injectTimes() {
     document.querySelectorAll('tr.topic-list-item').forEach((row) => {
       const activityTd = row.querySelector('td.activity');
@@ -1772,7 +1821,7 @@
       if (chip.previousElementSibling !== link) link.insertAdjacentElement('afterend', chip);
       chip.className = tier === 'old' ? TIME_CLASS : `${TIME_CLASS} ${TIME_CLASS}--${tier}`;
       chip.textContent = text;
-      chip.title = `发帖于 ${created}`;
+      chip.title = isDebugMode() ? debugPriorityTitle(row, created) : `发帖于 ${created}`;
     });
   }
 
@@ -2318,6 +2367,7 @@
         .ld-tle-panel__btns button:hover, .ld-tle-panel__row button:hover { background: #f6f8fa; }
         .ld-tle-panel__btns button.ld-tle-panel__danger { border-color: #cf222e; color: #cf222e; font-weight: 700; }
         .ld-tle-panel__btns button.ld-tle-panel__danger:hover { background: #ffebe9; }
+        .ld-tle-panel__debug-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; color: #57606a; cursor: pointer; }
        .ld-tle-panel__row .ld-tle-panel__row-group-tag { padding: 3px 9px; border: 1px solid #8250df; border-radius: 6px 0 0 6px; background: #f3efff; color: #6639b5; font: 600 12px/18px ui-sans-serif, system-ui, sans-serif; }
        .ld-tle-panel__row .ld-tle-panel__row-group-remove { padding: 0 !important; border: 1px solid #d0d7de; border-left: 0; border-radius: 0 6px 6px 0; background: #f6f8fa; color: #8b949e; }
       .ld-tle-panel__msg { min-height: 1.2em; color: #57606a; font-size: 12px; }
