@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.65.0
+// @version      0.66.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.65.0';
+  const SCRIPT_VERSION = '0.66.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -227,14 +227,17 @@
     const tagElements = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')];
     const tagsText = tagElements.map((el) => el.textContent).join(' ');
     const haystack = `${title} ${tagsText}`.toLowerCase();
-    const rule = keywordRules.find((r) => r.enabled && r.keyword && haystack.includes(r.keyword.toLowerCase()) && boundEffects(r.effectIds).length);
-    if (!rule) return null;
-    const keyword = rule.keyword.toLowerCase();
-    return {
-      rule,
-      effects: boundEffects(rule.effectIds, rule.color),
-      matchingTags: tagElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
-    };
+    const matches = [];
+    keywordRules.forEach((r) => {
+      if (!r.enabled || !r.keyword || !haystack.includes(r.keyword.toLowerCase()) || !boundEffects(r.effectIds).length) return;
+      const keyword = r.keyword.toLowerCase();
+      matches.push({
+        rule: r,
+        effects: boundEffects(r.effectIds, r.color),
+        matchingTags: tagElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
+      });
+    });
+    return matches.length ? { matches } : null;
   }
 
   function moveKeywordRule(id, direction) {
@@ -449,12 +452,12 @@
       const user = opLink && opLink.getAttribute('data-user-card');
       const mark = getMark(user);
       const keywordMatch = keywordCategory(row);
-      keywordMatch?.matchingTags.forEach((el) => el.classList.add('ld-tle-keyword-match'));
+      keywordMatch?.matches.forEach((match) => match.matchingTags.forEach((el) => el.classList.add('ld-tle-keyword-match')));
       const candidates = [];
       if (mark) {
         markEffects(mark).forEach((effect) => candidates.push(effect));
       }
-      if (keywordMatch?.effects) keywordMatch.effects.forEach((effect) => candidates.push({ ...effect, priority: keywordMatch.rule.priority ?? 5000, source: `关键词·${keywordMatch.rule.keyword}` }));
+      keywordMatch?.matches.forEach((match) => match.effects.forEach((effect) => candidates.push({ ...effect, priority: match.rule.priority ?? 5000, source: `关键词·${match.rule.keyword}` })));
       reusableEffectForRow(row).forEach((effect) => {
         if (effect) candidates.push({ ...effect, priority: effect.priority || 0 });
       });
@@ -463,7 +466,7 @@
       const title = row.querySelector('.link-top-line, td.main-link');
       title?.querySelectorAll('.ld-tle-keyword-badge').forEach((el) => el.remove());
       paintBadges(title, mark, null);
-       if (keywordMatch && !mark) setEffectBadge(title, keywordMatch.effects, keywordMatch.rule.keyword);
+       if (keywordMatch?.matches.length && !mark) setEffectBadge(title, keywordMatch.matches.flatMap((match) => match.effects), keywordMatch.matches.map((match) => match.rule.keyword).join('、'));
     });
 
     document.querySelectorAll('article[id^="post_"]').forEach((post) => {
