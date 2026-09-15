@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.66.0
+// @version      0.67.0
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.66.0';
+  const SCRIPT_VERSION = '0.67.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -440,7 +440,9 @@
   }
 
   function applyMarks() {
-    document.querySelectorAll('tr.topic-list-item').forEach((row) => {
+    mutationObserver?.disconnect();
+    try {
+      document.querySelectorAll('tr.topic-list-item').forEach((row) => {
       row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => el.classList.remove('ld-tle-keyword-match'));
       const posters = row.querySelector('td.posters');
       const opLink = posters && (
@@ -464,26 +466,29 @@
       const result = applyTopicEffects(row, candidates);
       row.__ldTleDebug = { candidates, applied: result.applied, colorWinner: result.colorWinner, tagWinner: result.tagWinner };
       const title = row.querySelector('.link-top-line, td.main-link');
-      title?.querySelectorAll('.ld-tle-keyword-badge').forEach((el) => el.remove());
       paintBadges(title, mark, null);
-       if (keywordMatch?.matches.length && !mark) setEffectBadge(title, keywordMatch.matches.flatMap((match) => match.effects), keywordMatch.matches.map((match) => match.rule.keyword).join('、'));
-    });
+      setEffectBadge(title, keywordMatch?.matches.length && !mark
+        ? keywordMatch.matches.flatMap((match) => match.effects)
+        : [], keywordMatch?.matches.map((match) => match.rule.keyword).join('、') || '');
+      });
 
-    document.querySelectorAll('article[id^="post_"]').forEach((post) => {
-      markClassList(post);
-      post.querySelectorAll('.' + MARK_ADD + ', .' + MARK_ROW).forEach((el) => el.remove());
-      const names = post.querySelector('.names .first, .names');
-      const userEl = post.querySelector('.names [data-user-card], .names a[href^="/u/"]');
-      const user = userEl && usernameFromEl(userEl);
-      paintBadges(names, getMark(user), null);
-    });
+      document.querySelectorAll('article[id^="post_"]').forEach((post) => {
+        markClassList(post);
+        const names = post.querySelector('.names .first, .names');
+        const userEl = post.querySelector('.names [data-user-card], .names a[href^="/u/"]');
+        const user = userEl && usernameFromEl(userEl);
+        paintBadges(names, getMark(user), null);
+      });
 
-    document.querySelectorAll('#user-card, .user-card, .d-user-card').forEach((card) => {
-      const name = cardUsername(card);
-      decorateUserCard(card, name, getMark(name));
-    });
+      document.querySelectorAll('#user-card, .user-card, .d-user-card').forEach((card) => {
+        const name = cardUsername(card);
+        decorateUserCard(card, name, getMark(name));
+      });
 
-    decorateBoosts();
+      decorateBoosts();
+    } finally {
+      observeDocument();
+    }
   }
 
   function decorateBoosts() {
@@ -550,37 +555,49 @@
 
   // Shared effect layer: user marks and future rules can use the same topic-row behavior.
   function applyTopicEffects(row, effectsToApply) {
-    markClassList(row);
-    row.style.removeProperty('--ld-tle-effect-color');
-    row.style.removeProperty('--ld-tle-tag-color');
-    row.classList.remove('ld-tle-welfare-only');
     const seen = new Set();
     const activeEffects = effectsToApply.filter((effect) => effect && effect.enabled !== false)
-      .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0)
+        || String(a.id).localeCompare(String(b.id))
+        || String(a.source || '').localeCompare(String(b.source || '')));
     const exclusiveKinds = new Set(['color', 'tag', 'fade']);
     const selectedKinds = new Set();
     let colorWinner = null;
     let tagWinner = null;
-    activeEffects.filter((effect) => !exclusiveKinds.has(effect.kind) || !selectedKinds.has(effect.kind)).forEach((effect) => {
+    const selectedEffects = activeEffects.filter((effect) => !exclusiveKinds.has(effect.kind) || !selectedKinds.has(effect.kind)).filter((effect) => {
       if (exclusiveKinds.has(effect.kind)) selectedKinds.add(effect.kind);
-      if (effect.kind === 'color' && !row.style.getPropertyValue('--ld-tle-effect-color')) { row.style.setProperty('--ld-tle-effect-color', effect.color); colorWinner = effect; }
+      if (effect.kind === 'color' && !colorWinner) colorWinner = effect;
       if (effect.kind === 'tag') {
-        row.classList.add(`${EFFECT_CLASS}--tag-highlight`);
-        if (effect.welfareOnly) row.classList.add('ld-tle-welfare-only');
-        if (!row.style.getPropertyValue('--ld-tle-tag-color')) { row.style.setProperty('--ld-tle-tag-color', effect.color); tagWinner = effect; }
+        if (!tagWinner) tagWinner = effect;
       }
-      if (!seen.has(effect.id)) {
-        seen.add(effect.id);
-        row.classList.add(`${EFFECT_CLASS}--${effect.id}`);
-      }
+      return !seen.has(effect.id) && seen.add(effect.id);
     });
+    const nextClasses = new Set(selectedEffects.map((effect) => `${EFFECT_CLASS}--${effect.id}`));
+    if (tagWinner) nextClasses.add(`${EFFECT_CLASS}--tag-highlight`);
+    [...row.classList].filter((name) => name.startsWith(EFFECT_CLASS + '--') && !nextClasses.has(name)).forEach((name) => row.classList.remove(name));
+    nextClasses.forEach((name) => row.classList.add(name));
+    row.classList.toggle('ld-tle-welfare-only', !!tagWinner?.welfareOnly);
+    const color = colorWinner?.color || '';
+    const tagColor = tagWinner?.color || '';
+    if (row.style.getPropertyValue('--ld-tle-effect-color') !== color) {
+      if (color) row.style.setProperty('--ld-tle-effect-color', color);
+      else row.style.removeProperty('--ld-tle-effect-color');
+    }
+    if (row.style.getPropertyValue('--ld-tle-tag-color') !== tagColor) {
+      if (tagColor) row.style.setProperty('--ld-tle-tag-color', tagColor);
+      else row.style.removeProperty('--ld-tle-tag-color');
+    }
     return { applied: activeEffects, colorWinner, tagWinner };
   }
 
   function setEffectBadge(host, effect, keyword) {
     const selected = (Array.isArray(effect) ? effect : [effect]).filter((item) => item && item.kind === 'badge');
-    if (!host || !selected.length) return;
+    if (!host) return;
     let badge = host.querySelector(':scope > .ld-tle-keyword-badge');
+    if (!selected.length) {
+      badge?.remove();
+      return;
+    }
     if (!badge) {
       badge = document.createElement('span');
       badge.className = 'ld-tle-keyword-badge';
@@ -646,21 +663,23 @@
     [...host.children].forEach((el) => {
       if (el.classList.contains(MARK_BADGE) || el.classList.contains(MARK_ADD)) return;
     });
-    const existing = [...host.querySelectorAll(':scope > .' + MARK_BADGE)];
-    existing.forEach((el, i) => { if (i >= wanted.length) el.remove(); });
-    wanted.forEach((item, i) => {
-      let badge = host.querySelectorAll(':scope > .' + MARK_BADGE)[i];
+    const existing = [...host.querySelectorAll(':scope > .' + MARK_BADGE + ':not(.ld-tle-keyword-badge)')];
+    const used = new Set();
+    wanted.forEach((item) => {
+      const cls = `${MARK_BADGE} ${MARK_BADGE}--${item.kind}-${item.id}`;
+      let badge = existing.find((el) => !used.has(el) && el.className === cls);
       if (!badge) {
         badge = document.createElement('span');
         const btn = host.querySelector(':scope > .' + MARK_ADD);
         if (btn) host.insertBefore(badge, btn);
         else host.append(badge);
       }
-      const cls = `${MARK_BADGE} ${MARK_BADGE}--${item.kind}-${item.id}`;
+      used.add(badge);
       if (badge.className !== cls) badge.className = cls;
       if (badge.textContent !== item.label) badge.textContent = item.label;
       if (badge.title !== item.title) badge.title = item.title;
     });
+    existing.filter((el) => !used.has(el)).forEach((el) => el.remove());
     if (username) attachMarkButton(host, username);
     else host.querySelectorAll(':scope > .' + MARK_ADD).forEach((el) => el.remove());
   }
@@ -1981,6 +2000,8 @@
       childList: true,
       subtree: true,
       characterData: true,
+      attributes: true,
+      attributeFilter: ['class', 'href', 'title', 'data-user-card', 'data-username', 'data-tag-name', 'aria-expanded'],
     });
   }
 
