@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.67.0
-// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel.
+// @version      0.68.0
+// @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
 // @run-at       document-idle
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.67.0';
+  const SCRIPT_VERSION = '0.68.0';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -29,6 +29,8 @@
   const KEYWORDS_KEY = 'ld-tle-keyword-rules';
   const EFFECTS_KEY = 'ld-tle-topic-effects';
   const DEBUG_KEY = 'ld-tle-debug';
+  const SUSPEND_KEY = 'ld-tle-suspended';
+  const SUSPEND_CLASS = 'ld-tle-suspended';
   const MARK_STYLE_ID = 'ld-tle-mark-dyn';
   const MARK_CLASS = 'ld-tle-mark';
   const EFFECT_CLASS = 'ld-tle-effect';
@@ -78,6 +80,7 @@
   let marks = loadMarks();
   let pickerEl = null;
   let panelEl = null;
+  let suspendCleared = false;
 
   cats.forEach((group) => {
     group.effectIds = libraryEffectIds(group.effectIds).filter((id) => getEffect(id));
@@ -894,15 +897,25 @@
     return dropped;
   }
 
+  function updateFabState() {
+    const fab = document.querySelector('.ld-tle-fab');
+    if (!fab) return;
+    const suspended = isSuspended();
+    fab.classList.toggle('ld-tle-fab--suspended', suspended);
+    fab.textContent = suspended ? '已暂停' : '标记';
+    fab.title = suspended ? '效果已临时关闭 · 点击打开面板' : '用户标记';
+  }
+
   function ensureFab() {
-    if (document.querySelector('.ld-tle-fab')) return;
-    const fab = document.createElement('button');
-    fab.type = 'button';
-    fab.className = 'ld-tle-fab';
-    fab.title = '用户标记';
-    fab.textContent = '标记';
-    fab.addEventListener('click', togglePanel);
-    document.body.append(fab);
+    let fab = document.querySelector('.ld-tle-fab');
+    if (!fab) {
+      fab = document.createElement('button');
+      fab.type = 'button';
+      fab.className = 'ld-tle-fab';
+      fab.addEventListener('click', togglePanel);
+      document.body.append(fab);
+    }
+    updateFabState();
   }
 
   function togglePanel() {
@@ -912,6 +925,8 @@
     }
     ensurePanel();
     panelEl.classList.add('is-open');
+    const suspendToggle = panelEl.querySelector('.ld-tle-panel__suspend');
+    if (suspendToggle) suspendToggle.checked = isSuspended();
     fillCatSelects();
     renderEffects();
     renderBuiltinRules();
@@ -946,6 +961,7 @@
         <button type="button" data-pane="groups">分组</button>
         <button type="button" data-pane="keywords">关键词匹配</button>
         <button type="button" data-pane="data">数据</button>
+        <button type="button" data-pane="advanced">高级</button>
       </div>
       <section class="ld-tle-panel__pane is-active" data-pane="users">
         <div class="ld-tle-panel__overview">
@@ -1015,6 +1031,13 @@
         <div class="ld-tle-panel__section-head"><div><strong>调试</strong><span>开启后悬浮时间标签可查看优先级应用关系</span></div></div>
         <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__debug"> 启用调试模式</label>
       </section>
+      <section class="ld-tle-panel__pane" data-pane="advanced">
+        <div class="ld-tle-panel__section-head"><div><strong>高级</strong><span>全局开关，暂停脚本的全部页面效果，标记与设置数据不受影响</span></div></div>
+        <div class="ld-tle-panel__card">
+          <label class="ld-tle-panel__debug-toggle"><input type="checkbox" class="ld-tle-panel__suspend"> 临时关闭所有效果</label>
+          <div class="ld-tle-panel__suspend-hint">开启后：等级标签、时间标签、推广/抽奖淡化、陈旧淡化、待回复标记、楼主高亮、回复跳转、用户标记徽章与行效果、关键词效果全部停止。悬浮按钮和本面板保持可用，关闭开关即可原样恢复。</div>
+        </div>
+      </section>
       <div class="ld-tle-panel__msg" aria-live="polite"></div>
     `;
     panelEl.querySelector('[data-act="close"]').addEventListener('click', () => panelEl.classList.remove('is-open'));
@@ -1051,6 +1074,15 @@
       setDebugMode(debugToggle.checked);
       processWithRetries();
     });
+    const suspendToggle = panelEl.querySelector('.ld-tle-panel__suspend');
+    if (suspendToggle) {
+      suspendToggle.checked = isSuspended();
+      suspendToggle.addEventListener('change', () => {
+        setSuspended(suspendToggle.checked);
+        showPanelMsg(suspendToggle.checked ? '已临时关闭所有效果（设置与标记数据已保留）' : '已恢复所有效果');
+        processWithRetries();
+      });
+    }
     panelEl.querySelector('[data-act="add"]').addEventListener('click', () => {
       const input = panelEl.querySelector('.ld-tle-panel__user');
       const user = (input.value || '').trim();
@@ -1801,6 +1833,58 @@
     } catch (e) { /* ignore */ }
   }
 
+  function isSuspended() {
+    try { return localStorage.getItem(SUSPEND_KEY) === '1'; } catch (e) { return false; }
+  }
+
+  function setSuspended(on) {
+    try {
+      if (on) localStorage.setItem(SUSPEND_KEY, '1');
+      else localStorage.removeItem(SUSPEND_KEY);
+    } catch (e) { /* ignore */ }
+    document.documentElement.classList.toggle(SUSPEND_CLASS, !!on);
+    updateFabState();
+    if (on) {
+      clearEffectState();
+      suspendCleared = true;
+    } else {
+      suspendCleared = false;
+    }
+  }
+
+  // Remove every class/inline-style based effect. Injected nodes (chips, time
+  // labels, badges, jump links, mark buttons) are preserved and hidden by CSS so
+  // that re-enabling restores them without losing parsed data such as levels.
+  function clearEffectState() {
+    document.querySelectorAll('tr.topic-list-item').forEach((row) => {
+      row.classList.remove(PROMO_CLASS, LOTTERY_CLASS, LONELY_CLASS, STALE_CLASS, 'ld-tle-welfare-only');
+      [...row.classList].filter((name) => name.startsWith(EFFECT_CLASS + '--')).forEach((name) => row.classList.remove(name));
+      row.style.removeProperty('--ld-tle-effect-color');
+      row.style.removeProperty('--ld-tle-tag-color');
+      row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => el.classList.remove('ld-tle-keyword-match'));
+      delete row.__ldTleDebug;
+    });
+    document.querySelectorAll('td.' + ROW_CLASS).forEach((td) => {
+      [...td.classList].filter((name) => name === ROW_CLASS || name.startsWith(ROW_CLASS + '--')).forEach((name) => td.classList.remove(name));
+    });
+    document.querySelectorAll('img.ld-tle-op, img.ld-tle-other').forEach((img) => {
+      [...img.classList].filter((name) => name === 'ld-tle-op' || name === 'ld-tle-other' || /^ld-tle-op--\d$/.test(name)).forEach((name) => img.classList.remove(name));
+    });
+    document.querySelectorAll('article.' + OP_POST_CLASS).forEach((el) => el.classList.remove(OP_POST_CLASS));
+    document.querySelectorAll('.discourse-boosts__list .discourse-boosts__bubble').forEach((bubble) => {
+      bubble.classList.remove(BOOST_MARK_CLASS);
+      bubble.removeAttribute('data-ld-tle-boost-title');
+      const avatar = bubble.querySelector('a[data-user-card] img.avatar');
+      if (!avatar) return;
+      avatar.classList.remove(BOOST_MARK_CLASS);
+      avatar.style.removeProperty('--ld-tle-boost-color');
+      if (avatar.dataset.ldTleBoostTitle) {
+        avatar.title = avatar.dataset.ldTleBoostTitle;
+        delete avatar.dataset.ldTleBoostTitle;
+      }
+    });
+  }
+
   function debugPriorityTitle(row, created) {
     const lines = [`发帖于 ${created}`, '── 优先级应用关系 ──'];
     const info = row && row.__ldTleDebug;
@@ -1939,7 +2023,18 @@
   function processPage() {
     mutationObserver?.disconnect();
     try {
+      const suspended = isSuspended();
+      document.documentElement.classList.toggle(SUSPEND_CLASS, suspended);
       addStyles();
+      ensureFab();
+      if (suspended) {
+        if (!suspendCleared) {
+          clearEffectState();
+          suspendCleared = true;
+        }
+        return;
+      }
+      suspendCleared = false;
       document.querySelectorAll(NAME_SEL).forEach(enhanceBadge);
       enhanceWelfareBadge();
       weakenPromoRows();
@@ -1950,9 +2045,8 @@
       enhanceOpPosts();
       addReplyJumpLinks();
       applyMarks();
-      ensureFab();
     } finally {
-      observeDocument();
+      if (!isSuspended()) observeDocument();
     }
   }
 
@@ -2454,6 +2548,20 @@
         .ld-tle-panel__bar button, .ld-tle-panel__btns button, .ld-tle-panel__row button { background: #0d1117; border-color: #30363d; color: #c9d1d9; }
         .ld-tle-panel__sec, .ld-tle-panel__btns { border-color: #30363d; }
       }
+
+      /* Advanced: master switch that temporarily suspends every page effect */
+      .ld-tle-panel__suspend-hint { margin-top: 7px; color: #8b949e; font-size: 11px; line-height: 1.6; }
+      .ld-tle-fab--suspended { background: #cf222e; color: #fff; }
+      html.${SUSPEND_CLASS} .${CHIP_CLASS},
+      html.${SUSPEND_CLASS} .${TIME_CLASS},
+      html.${SUSPEND_CLASS} .${MARK_BADGE},
+      html.${SUSPEND_CLASS} .${MARK_ROW},
+      html.${SUSPEND_CLASS} .${MARK_ADD},
+      html.${SUSPEND_CLASS} .ld-tle-mark-control,
+      html.${SUSPEND_CLASS} .${JUMP_CLASS},
+      html.${SUSPEND_CLASS} .ld-tle-keyword-badge {
+        display: none !important;
+      }
     `;
     document.head.append(style);
     updateMarkStyles();
@@ -2521,10 +2629,11 @@
   }
 
   addStyles();
+  document.documentElement.classList.toggle(SUSPEND_CLASS, isSuspended());
   processWithRetries();
 
   mutationObserver = new MutationObserver(scheduleMutationRefresh);
-  observeDocument();
+  if (!isSuspended()) observeDocument();
   window.addEventListener('scroll', scheduleScrollRefresh, { passive: true });
   window.addEventListener('resize', scheduleProcessing, { passive: true });
   window.addEventListener('popstate', processWithRetries);
