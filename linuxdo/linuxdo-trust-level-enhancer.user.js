@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.68.1
+// @version      0.68.2
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.68.1';
+  const SCRIPT_VERSION = '0.68.2';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -240,10 +240,37 @@
       matches.push({
         rule: r,
         effects: boundEffects(r.effectIds, r.color),
+        titleMatch: title.toLowerCase().includes(keyword),
         matchingTags: matchableElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
       });
     });
     return matches.length ? { matches } : null;
+  }
+
+  function keywordTagColor(match) {
+    const effect = (match.effects || []).find((item) => item.kind === 'tag');
+    return effect ? effect.color : '';
+  }
+
+  // Each matched tag/category keeps its own rule color instead of sharing one
+  // row color. When several rules match the same element, a rule that also hit
+  // the topic title wins (标题规则可以覆盖), otherwise the higher priority wins.
+  function resolveKeywordColors(keywordMatch) {
+    const result = new Map();
+    if (!keywordMatch) return result;
+    keywordMatch.matches.forEach((match) => {
+      const color = keywordTagColor(match);
+      if (!color) return;
+      const priority = match.rule.priority ?? 5000;
+      match.matchingTags.forEach((el) => {
+        const prev = result.get(el);
+        const wins = !prev
+          || (match.titleMatch && !prev.titleMatch)
+          || (match.titleMatch === prev.titleMatch && priority >= prev.priority);
+        if (wins) result.set(el, { color, priority, titleMatch: match.titleMatch });
+      });
+    });
+    return result;
   }
 
   function moveKeywordRule(id, direction) {
@@ -449,7 +476,10 @@
     mutationObserver?.disconnect();
     try {
       document.querySelectorAll('tr.topic-list-item').forEach((row) => {
-      row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => el.classList.remove('ld-tle-keyword-match'));
+      row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => {
+        el.classList.remove('ld-tle-keyword-match');
+        el.style.removeProperty('--ld-tle-tag-color');
+      });
       const posters = row.querySelector('td.posters');
       const opLink = posters && (
         [...posters.querySelectorAll('a[data-user-card]')].find((a) => {
@@ -461,6 +491,9 @@
       const mark = getMark(user);
       const keywordMatch = keywordCategory(row);
       keywordMatch?.matches.forEach((match) => match.matchingTags.forEach((el) => el.classList.add('ld-tle-keyword-match')));
+      resolveKeywordColors(keywordMatch).forEach((info, el) => {
+        el.style.setProperty('--ld-tle-tag-color', info.color);
+      });
       const candidates = [];
       if (mark) {
         markEffects(mark).forEach((effect) => candidates.push(effect));
@@ -1864,7 +1897,10 @@
       [...row.classList].filter((name) => name.startsWith(EFFECT_CLASS + '--')).forEach((name) => row.classList.remove(name));
       row.style.removeProperty('--ld-tle-effect-color');
       row.style.removeProperty('--ld-tle-tag-color');
-      row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => el.classList.remove('ld-tle-keyword-match'));
+      row.querySelectorAll('.ld-tle-keyword-match').forEach((el) => {
+        el.classList.remove('ld-tle-keyword-match');
+        el.style.removeProperty('--ld-tle-tag-color');
+      });
       delete row.__ldTleDebug;
     });
     document.querySelectorAll('td.' + ROW_CLASS).forEach((td) => {
