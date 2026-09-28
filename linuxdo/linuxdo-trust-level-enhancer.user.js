@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LinuxDo Trust Level Enhancer
 // @namespace    https://linux.do/
-// @version      0.68.0
+// @version      0.68.1
 // @description  Strengthen trust level display on linux.do topic lists by turning the LvN portion of category badges into prominent colored chips, accenting rows by trust level, de-emphasizing promotional topics, surfacing the post creation date inside the activity column, highlighting the original poster's avatar, emphasizing the original poster (楼主) on topic pages, marking topics with no replies, and dimming topics older than a week. Customizable user-mark categories override all other row/post effects and can be imported, exported, merged, and deduplicated from a manage panel. An advanced master switch can temporarily suspend every page effect without touching saved data.
 // @match        https://linux.do/*
 // @grant        none
@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.68.0';
+  const SCRIPT_VERSION = '0.68.1';
   const STYLE_ID = 'ld-tle-style';
   const CHIP_CLASS = 'ld-tle-chip';
   const ROW_CLASS = 'ld-tle-row';
@@ -228,8 +228,11 @@
   function keywordCategory(row) {
     const title = row.querySelector('.raw-topic-link, .title, .link-top-line')?.textContent || '';
     const tagElements = [...row.querySelectorAll('a.discourse-tag, .discourse-tag')];
+    const categoryElements = [...row.querySelectorAll('.badge-category')];
     const tagsText = tagElements.map((el) => el.textContent).join(' ');
-    const haystack = `${title} ${tagsText}`.toLowerCase();
+    const categoriesText = categoryElements.map((el) => el.textContent).join(' ');
+    const haystack = `${title} ${tagsText} ${categoriesText}`.toLowerCase();
+    const matchableElements = [...tagElements, ...categoryElements];
     const matches = [];
     keywordRules.forEach((r) => {
       if (!r.enabled || !r.keyword || !haystack.includes(r.keyword.toLowerCase()) || !boundEffects(r.effectIds).length) return;
@@ -237,7 +240,7 @@
       matches.push({
         rule: r,
         effects: boundEffects(r.effectIds, r.color),
-        matchingTags: tagElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
+        matchingTags: matchableElements.filter((el) => el.textContent.toLowerCase().includes(keyword)),
       });
     });
     return matches.length ? { matches } : null;
@@ -2606,6 +2609,7 @@
           tr.${EFFECT_CLASS}--${effect.id} .link-top-line > a,
           tr.${EFFECT_CLASS}--${effect.id} .link-top-line .raw-topic-link { ${mosaic} }
           tr.${EFFECT_CLASS}--tag-highlight:not(.ld-tle-welfare-only) .ld-tle-keyword-match { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
+          tr.${EFFECT_CLASS}--tag-highlight:not(.ld-tle-welfare-only) .ld-tle-keyword-match .badge-category__name { color: var(--ld-tle-tag-color) !important; }
          tr.${EFFECT_CLASS}--tag-highlight.ld-tle-welfare-only .badge-category { color: var(--ld-tle-tag-color) !important; background: color-mix(in srgb, var(--ld-tle-tag-color) 18%, transparent) !important; border-color: var(--ld-tle-tag-color) !important; }
          tr.${EFFECT_CLASS}--${effect.id} .link-top-line::after {
           ${effect.kind === 'badge' ? `content: '${effect.label.replace(/['\\]/g, '\\$&')}'; display: inline-flex; margin-left: 6px; padding: 0 6px; border-radius: 3px; color: ${fg}; background: ${effect.color}; font-size: 10px; line-height: 16px;` : ''}
